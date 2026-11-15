@@ -1,0 +1,157 @@
+# Morgenzeitung – Konfiguration
+# Nach Änderungen einfach neu testen:  /opt/morgenzeitung/venv/bin/python /opt/morgenzeitung/morgenzeitung.py --nosend
+
+[zeitung]
+titel = "Lukas Morgenzeitung"
+ausgabe_ordner = "/opt/morgenzeitung/ausgaben"
+max_woerter_pro_artikel = 900     # lange Artikel werden gekürzt
+behalten_tage = 14                 # alte EPUBs danach löschen
+
+[mail]
+smtp_server = "smtp.gmail.com"
+smtp_port = 587
+absender = "DEINE_GMAIL_ADRESSE@gmail.com"   # muss bei Amazon als genehmigter Absender eingetragen sein
+app_passwort = "xxxx xxxx xxxx xxxx"          # Google-App-Passwort, NICHT dein normales Passwort
+kindle_adresse = "luka.geiss_9LgRqi@kindle.com"
+
+[homeassistant]
+url = "http://192.168.178.173:8123"
+token = "LANGLEBIGES_HA_TOKEN"
+wetter = "weather.forecast_home"
+kalender = ["calendar.claude", "calendar.google_luka", "calendar.abfall"]
+kalender_tage = 2                  # heute + morgen
+feiertage = "calendar.app_deutschland_he"   # Feiertage Deutschland + Hessen
+feiertage_tage = 7                 # Feiertage so viele Tage im Voraus anzeigen
+
+# ---------------------------------------------------------------
+# Rubriken: Reihenfolge = Reihenfolge in der Zeitung
+#   anzahl     = maximale Artikel aus dieser Rubrik
+#   volltext   = true: kompletten Artikel laden (klappt auch bei Google-News-Feeds)
+#                false: nur Überschrift + Kurztext
+#   nur_mit_text = true: Meldungen ohne lesbaren Artikeltext überspringen
+#   max_woerter  = Kürzungsgrenze nur für diese Rubrik
+#   max_alter_stunden = ältere Meldungen werden ignoriert
+# Google-News-Suche als Feed:
+#   https://news.google.com/rss/search?q=SUCHBEGRIFF&hl=de&gl=DE&ceid=DE:de
+# ---------------------------------------------------------------
+
+[[rubrik]]
+name = "Nachrichten"
+feeds = ["https://www.tagesschau.de/index~rss2.xml"]
+anzahl = 5
+volltext = true
+max_alter_stunden = 24
+
+[[rubrik]]
+name = "Lokales"
+feeds = ["https://news.google.com/rss/search?q=M%C3%B6rfelden-Walldorf+when:3d&hl=de&gl=DE&ceid=DE:de",
+         "https://www.hessenschau.de/suedhessen/index.rss",
+         "https://news.google.com/rss/search?q=%22Kreis+Gro%C3%9F-Gerau%22+when:2d&hl=de&gl=DE&ceid=DE:de"]
+anzahl = 5
+volltext = true          # Artikeltext laden (Google-News-Links werden aufgelöst)
+nur_mit_text = true      # Meldungen ohne lesbaren Text überspringen (z. B. Bezahlschranke)
+max_woerter = 500
+max_alter_stunden = 72
+
+[[rubrik]]
+name = "Flohmärkte"
+typ = "hessenschau_termine"   # wöchentliche Terminübersicht der hessenschau, nach Orten gefiltert
+feeds = ["https://www.hessenschau.de/freizeit/index.rss"]
+mit_maerkten = false          # true: auch "Märkte und Feste" (Weihnachtsmärkte, Kreativmärkte …)
+# Reihenfolge = Reihenfolge in der Zeitung, nahe Orte zuerst
+orte = ["Mörfelden-Walldorf", "Kelsterbach", "Langen", "Groß-Gerau", "Büttelborn", "Nauheim",
+        "Rüsselsheim", "Raunheim", "Neu-Isenburg", "Dreieich", "Egelsbach", "Weiterstadt",
+        "Riedstadt", "Trebur", "Frankfurt", "Offenbach", "Darmstadt", "Eschborn", "Wiesbaden"]
+
+[[rubrik]]
+name = "Flohmarkt-News"
+feeds = ["https://news.google.com/rss/search?q=%28Flohmarkt+OR+Hofflohmarkt+OR+Kinderflohmarkt+OR+Tr%C3%B6delmarkt%29+%28M%C3%B6rfelden+OR+Walldorf+OR+Langen+OR+%22Gro%C3%9F-Gerau%22+OR+R%C3%BCsselsheim+OR+Kelsterbach+OR+%22Neu-Isenburg%22+OR+Dreieich+OR+Raunheim+OR+Darmstadt+OR+Offenbach+OR+Frankfurt%29+when:14d&hl=de&gl=DE&ceid=DE:de"]
+anzahl = 6
+volltext = true
+nur_mit_text = false     # Ankündigung auch dann zeigen, wenn nur die Überschrift lesbar ist
+max_woerter = 250
+max_alter_stunden = 336  # 14 Tage
+
+[[rubrik]]
+name = "IT & Technik"
+feeds = ["https://www.heise.de/rss/heise-atom.xml"]
+anzahl = 4
+volltext = true
+max_alter_stunden = 24
+
+[[rubrik]]
+name = "Rechenzentrum"
+feeds = ["https://news.google.com/rss/search?q=Rechenzentrum+when:2d&hl=de&gl=DE&ceid=DE:de",
+         "https://news.google.com/rss/search?q=%22data+center%22+when:2d&hl=en-US&gl=US&ceid=US:en"]
+anzahl = 4
+volltext = true
+nur_mit_text = true
+max_woerter = 400
+max_alter_stunden = 48
+
+[[rubrik]]
+name = "Smart Home"
+feeds = ["https://www.home-assistant.io/atom.xml",
+         "https://news.google.com/rss/search?q=%22Smart+Home%22+when:2d&hl=de&gl=DE&ceid=DE:de"]
+anzahl = 3
+volltext = true
+nur_mit_text = true
+max_woerter = 400
+max_alter_stunden = 72
+
+[[rubrik]]
+name = "Hacks & Entdeckungen"
+# Hacker News (nur Beiträge mit mind. 30 Punkten), Hacker-News-Startseite und Hackaday,
+# gefiltert auf Smart-Home-/Geräte-Hacks. Englischsprachig.
+feeds = ["https://hnrss.org/newest?q=Alexa+OR+%22Fire+TV%22+OR+webOS+OR+%22Home+Assistant%22+OR+jailbreak+OR+%22custom+firmware%22+OR+%22reverse+engineering%22+OR+Zigbee+OR+ESPHome+OR+Kindle+OR+Sonos+OR+Roomba+OR+%22smart+home%22&points=30&count=50",
+         "https://hnrss.org/frontpage?count=60",
+         "https://hackaday.com/blog/feed/"]
+stichwoerter = ["Alexa", "Amazon Echo", "Echo Dot", "Echo Show", "Fire TV", "FireTV", "webOS", "Tizen", "Chromecast", "Google Home", "Google Nest",
+                "Sonos", "Home Assistant", "ESPHome", "Tasmota", "Zigbee", "HomeKit", "Kindle",
+                "Ring doorbell", "Ring camera", "Tuya", "Shelly", "Philips Hue", "Roomba", "Roborock", "Valetudo", "SwitchBot", "PlayStation",
+                "PS4", "PS5", "jailbreak", "jailbroken", "rooted", "custom firmware", "firmware",
+                "reverse engineering", "reverse-engineered", "reverse engineered", "local control",
+                "smart home", "smart TV", "e-ink", "e-paper", "ESP32", "homelab", "self-hosted", "selfhosted"]
+anzahl = 4
+volltext = true
+nur_mit_text = true
+max_woerter = 400
+max_alter_stunden = 36
+
+[[rubrik]]
+name = "Gaming"
+feeds = ["https://news.google.com/rss/search?q=Gaming+OR+Videospiel+when:1d&hl=de&gl=DE&ceid=DE:de"]
+anzahl = 5
+volltext = true
+nur_mit_text = true
+max_woerter = 400
+max_alter_stunden = 30
+
+[[rubrik]]
+name = "Neue Releases"
+feeds = ["https://news.google.com/rss/search?q=Spiele+Releases+diese+Woche+when:7d&hl=de&gl=DE&ceid=DE:de",
+         "https://news.google.com/rss/search?q=%22new+games+this+week%22+when:7d&hl=en-US&gl=US&ceid=US:en"]
+anzahl = 3
+volltext = true
+nur_mit_text = true
+max_woerter = 400
+max_alter_stunden = 168
+
+[[rubrik]]
+name = "TrueAchievements & Gamerscore"
+feeds = ["https://news.google.com/rss/search?q=site:trueachievements.com+gamerscore+when:7d&hl=en-US&gl=US&ceid=US:en",
+         "https://news.google.com/rss/search?q=site:trueachievements.com+when:1d&hl=en-US&gl=US&ceid=US:en"]
+anzahl = 5
+volltext = true
+nur_mit_text = true
+max_woerter = 400
+max_alter_stunden = 168
+
+[[rubrik]]
+name = "Rocket League"
+feeds = ["https://news.google.com/rss/search?q=%22Rocket+League%22+when:3d&hl=en-US&gl=US&ceid=US:en"]
+anzahl = 3
+volltext = true
+nur_mit_text = true
+max_woerter = 400
+max_alter_stunden = 72
