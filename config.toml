@@ -23,6 +23,13 @@ kalender_tage = 2                  # heute + morgen
 feiertage = "calendar.app_deutschland_he"   # Feiertage Deutschland + Hessen
 feiertage_tage = 7                 # Feiertage so viele Tage im Voraus anzeigen
 
+[anime]
+# AniList: alle Serien auf "Watching" (und "Rewatching"); an Tagen mit neuer Folge
+# erscheint auf der Titelseite der Kasten "Anime – neue Folgen heute".
+# Liste muss öffentlich sein. Uhrzeit = TV-Ausstrahlung in Japan, Stream oft kurz danach.
+anilist_nutzer = "DEIN_ANILIST_NAME"
+titel = "romaji"                   # "romaji" (z. B. Sousou no Frieren) oder "english"
+
 # ---------------------------------------------------------------
 # Rubriken: Reihenfolge = Reihenfolge in der Zeitung
 #   anzahl     = maximale Artikel aus dieser Rubrik

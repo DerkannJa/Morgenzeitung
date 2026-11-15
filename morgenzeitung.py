@@ -165,6 +165,64 @@ def feiertage_html(ha, kalender, tage):
     return "".join(x for _, x in eintraege)
 
 
+# ---------------------------------------------------------------- Anime (AniList)
+ANILIST = "https://graphql.anilist.co"
+ANILIST_LISTE = """query ($name: String) {
+  MediaListCollection(userName: $name, type: ANIME, status_in: [CURRENT, REPEATING]) {
+    lists { entries { media { id title { romaji english } } } }
+  }
+}"""
+ANILIST_TERMINE = """query ($ids: [Int], $von: Int, $bis: Int) {
+  Page(perPage: 50) {
+    airingSchedules(mediaId_in: $ids, airingAt_greater: $von, airingAt_lesser: $bis, sort: TIME) {
+      airingAt episode mediaId
+    }
+  }
+}"""
+
+
+def anilist(query, variablen):
+    r = requests.post(ANILIST, json={"query": query, "variables": variablen},
+                      headers={"User-Agent": UA}, timeout=20)
+    daten = r.json()
+    if daten.get("errors"):
+        raise RuntimeError("; ".join(e.get("message", "?") for e in daten["errors"]))
+    r.raise_for_status()
+    return daten["data"]
+
+
+def anime_html(cfg):
+    """Neue Folgen von heute für alle Anime, die auf AniList als 'Watching' stehen. None wenn keine."""
+    nutzer = cfg.get("anilist_nutzer", "")
+    if not nutzer or nutzer.startswith("DEIN"):
+        return None
+    liste = anilist(ANILIST_LISTE, {"name": nutzer})["MediaListCollection"]
+    titel = {}
+    for l in (liste or {}).get("lists") or []:
+        for e in l.get("entries") or []:
+            t = e["media"]["title"]
+            titel[e["media"]["id"]] = (t.get("english") if cfg.get("titel") == "english" else None) \
+                or t.get("romaji") or t.get("english") or "?"
+    if not titel:
+        log.info("Anime: keine Serien auf 'Watching'")
+        return None
+    jetzt = dt.datetime.now(TZ)
+    start = jetzt.replace(hour=0, minute=0, second=0, microsecond=0)
+    ende = start + dt.timedelta(days=1)
+    folgen = anilist(ANILIST_TERMINE, {"ids": list(titel), "von": int(start.timestamp()) - 1,
+                                       "bis": int(ende.timestamp())})["Page"]["airingSchedules"]
+    log.info("Anime: %d Serien, %d neue Folgen heute", len(titel), len(folgen))
+    if not folgen:
+        return None
+    out = []
+    for f in folgen:
+        zeit = dt.datetime.fromtimestamp(f["airingAt"], TZ)
+        wann = "schon da" if zeit <= jetzt else zeit.strftime("%H:%M")
+        out.append(f"<p class='zeile'><b>{wann}</b> {esc(titel.get(f['mediaId'], '?'))} "
+                   f"<i>(Folge {f['episode']})</i></p>")
+    return "".join(out)
+
+
 # ---------------------------------------------------------------- Nachrichten
 def eintrag_zeit(e):
     for k in ("published_parsed", "updated_parsed"):
@@ -553,6 +611,14 @@ def zeitung_bauen(cfg):
     else:
         log.warning("Home Assistant nicht konfiguriert – Wetter/Termine fehlen")
 
+    if cfg.get("anime"):
+        try:
+            an = anime_html(cfg["anime"])
+            if an:
+                kasten("Anime – neue Folgen heute", an)
+        except Exception as e:
+            log.warning("Anime (AniList) nicht verfügbar: %s", e)
+
     kapitel, uebersicht, gesehen = [], [], set()
     for i, r in enumerate(cfg.get("rubrik", [])):
         if r.get("typ") == "hessenschau_termine":
@@ -569,8 +635,7 @@ def zeitung_bauen(cfg):
                          f"<p class='meta'>{esc(a['quelle'])} · {a['zeit']:%d.%m., %H:%M} Uhr</p>"
                          f"{a['body']}</div>")
         kapitel.append((datei, r["name"], "".join(teile)))
-        uebersicht.append(f"<p class='zeile'><a href='{datei}'><b>{esc(r['name'])}</b></a> "
-                          f"· {len(artikel)} Artikel</p>")
+        uebersicht.append(f"<p class='zeile'><a href='{datei}'><b>{esc(r['name'])}</b></a></p>")
 
     kasten("In dieser Ausgabe", "<div class='inhalt'>" + "".join(uebersicht) + "</div>")
     if kapitel:

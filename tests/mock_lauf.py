@@ -19,12 +19,17 @@ def get(url, headers=None, params=None, timeout=None):
     if "example.org" in url: return R(text=art)
     return R(content=rss(8, url[-12:].replace("&","").replace("<","")))
 def post(url, headers=None, json=None, timeout=None):
+    if "anilist" in url:
+        if "MediaListCollection" in json["query"]:
+            return R(js={"data":{"MediaListCollection":{"lists":[{"entries":[{"media":{"id":1,"title":{"romaji":"Sousou no Frieren","english":"Frieren"}}},{"media":{"id":2,"title":{"romaji":"Kusuriya no Hitorigoto","english":None}}}]}]}}})
+        v=json["variables"]; t0=v["von"]+1
+        return R(js={"data":{"Page":{"airingSchedules":[{"airingAt":t0+3*3600,"episode":7,"mediaId":2},{"airingAt":t0+17*3600+30*60,"episode":12,"mediaId":1}]}}})
     fc=[{"datetime":(now+dt.timedelta(days=d)).isoformat(),"condition":"rainy","temperature":9,"templow":3,"precipitation_probability":60} for d in range(5)]
     return R(js={"service_response":{"weather.forecast_home":{"forecast":fc}}})
 m.requests.get = get; m.requests.post = post
 m.gnewsdecoder = lambda u, interval=None: {'status': True, 'decoded_url': 'https://example.org/dec/'+u[-5:]} if 'Eceid' not in u[-5:] else {'status':False,'message':'x'}
 import tomllib
 cfg = tomllib.load(open(pathlib.Path(__file__).resolve().parents[1] / "config.toml","rb"))
-cfg["zeitung"]["ausgabe_ordner"]=str(pathlib.Path(__file__).resolve().parent / "out"); cfg["homeassistant"]["token"]="abc"
+cfg["zeitung"]["ausgabe_ordner"]=str(pathlib.Path(__file__).resolve().parent / "out"); cfg["homeassistant"]["token"]="abc"; cfg["anime"]["anilist_nutzer"]="test"
 import logging; logging.basicConfig(level=logging.INFO)
 p = m.zeitung_bauen(cfg); print(p)

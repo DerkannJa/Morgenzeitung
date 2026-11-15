@@ -1,6 +1,6 @@
 #!/bin/bash
 # Morgenzeitung – Update im LXC, als root ausführen:  bash update.sh
-# Übernimmt Gmail-Adresse, App-Passwort und HA-Token aus der bisherigen config.toml.
+# Übernimmt Gmail-Adresse, App-Passwort, HA-Token und AniList-Namen aus der bisherigen config.toml.
 set -euo pipefail
 ZIEL=/opt/morgenzeitung
 QUELLE="$(cd "$(dirname "$0")" && pwd)"
@@ -23,6 +23,10 @@ for key, wert in werte.items():
     text, n = re.subn(rf'^{key}\s*=\s*"[^"]*"', lambda m: f'{key} = "{wert}"', text, count=1, flags=re.M)
     if n != 1:
         sys.exit(f"Schlüssel {key} nicht gefunden")
+# Optionale Werte, die Luka evtl. direkt im LXC eingetragen hat
+nutzer = alt.get("anime", {}).get("anilist_nutzer", "")
+if nutzer and not nutzer.startswith("DEIN"):
+    text = re.sub(r'^anilist_nutzer\s*=\s*"[^"]*"', lambda m: f'anilist_nutzer = "{nutzer}"', text, count=1, flags=re.M)
 open(ziel, "w", encoding="utf-8").write(text)
 tomllib.load(open(ziel, "rb"))  # Prüfen, ob die neue Datei gültig ist
 print("Konfiguration übernommen.")

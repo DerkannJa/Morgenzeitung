@@ -7,7 +7,7 @@ Diese Datei ist der Einstiegspunkt für jede weitere Arbeit an der Morgenzeitung
 Luka bekommt jeden Morgen um 05:30 Uhr eine personalisierte Zeitung als EPUB auf seinen Kindle (11. Generation, 6 Zoll, Schwarz-Weiß). Inspiriert vom TikTok-Video von „JonathansBuild" (Heimserver, der morgens eine Zeitung auf den E-Reader schickt). Keine Werbung, kein Endlos-Scrollen – wenn die Zeitung zu Ende ist, ist sie zu Ende.
 
 Inhalt einer Ausgabe:
-- **Titelseite:** Wetter (aktuell + 4 Tage), Termine heute/morgen aus mehreren HA-Kalendern, Feiertage Hessen 7 Tage im Voraus, anklickbares Inhaltsverzeichnis.
+- **Titelseite:** Wetter (aktuell + 4 Tage), Termine heute/morgen aus mehreren HA-Kalendern, Feiertage Hessen 7 Tage im Voraus, Anime mit neuer Folge heute (AniList, Kasten nur an solchen Tagen), anklickbares Inhaltsverzeichnis (nur Rubriknamen, ohne Artikelanzahl – so gewünscht).
 - **Rubriken** (Reihenfolge = `config.toml`): Nachrichten, Lokales, Flohmärkte, Flohmarkt-News, IT & Technik, Rechenzentrum, Smart Home, Hacks & Entdeckungen, Gaming, Neue Releases, TrueAchievements & Gamerscore, Rocket League.
 
 ## 2. Wo es läuft
@@ -36,7 +36,7 @@ Secrets (Gmail-Adresse, App-Passwort, HA-Token) stehen **nur** in `/opt/morgenze
 Alles steckt in `morgenzeitung.py` (eine Datei, ~550 Zeilen, Python 3.13, Abhängigkeiten: `feedparser`, `requests`, `trafilatura`, `googlenewsdecoder`).
 
 Ablauf von `zeitung_bauen(cfg)`:
-1. Titelseite: `wetter_html`, `termine_html`, `feiertage_html` über die HA-REST-API (Klasse `HA`).
+1. Titelseite: `wetter_html`, `termine_html`, `feiertage_html` über die HA-REST-API (Klasse `HA`), danach `anime_html` (AniList, siehe 4.7).
 2. Für jede `[[rubrik]]`:
    - `typ = "hessenschau_termine"` → `termine_sammeln()` (siehe 4.4)
    - sonst → `rubrik_sammeln()`: Feeds laden (`feed_laden`), **abwechselnd** aus allen Feeds der Rubrik nehmen (Round-Robin), Alter filtern, Stichwortfilter, Duplikate über alle Rubriken hinweg aussortieren (`titel_norm`), bei `volltext = true` Artikeltext holen.
@@ -76,6 +76,9 @@ Die Google-Rubrik „Flohmarkt-News“ liefert oft 0 Treffer (Google hält `when
 
 ### 4.5 Hacks & Entdeckungen
 Hacker News (`hnrss.org/newest?q=…&points=30`), HN-Startseite, Hackaday – lokal gefiltert über `stichwoerter`. Mehrdeutige Begriffe („Echo“, „Ring“, „Nest“, „Matter“, „Hue“) bewusst nur in eindeutiger Form. Reddit-RSS wurde von Reddit am 13.11.2026 eingestellt – nicht verwenden.
+
+### 4.7 Anime (`anime_html`, Abschnitt `[anime]`)
+AniList-GraphQL-API (`graphql.anilist.co`, ohne Schlüssel). Liest Lukas Liste „Watching“/„Rewatching“ (`anilist_nutzer`, Liste muss öffentlich sein, sonst Fehler „Private User“ im Log) und fragt `airingSchedules` für heute 00:00–24:00 ab. Uhrzeit = TV-Ausstrahlung Japan in deutscher Zeit; bereits gelaufene Folgen stehen als „schon da“. Keine Folge heute → kein Kasten. `titel = "romaji"` oder `"english"`. `update.sh` übernimmt `anilist_nutzer` aus der alten Konfiguration.
 
 ### 4.6 Layout (Kindle 11. Gen, 6")
 CSS in `CSS` im Skript: linksbündig statt Blocksatz (Luka fand Blocksatz unschön), Zeitungskopf mit Linien, Titelseiten-„Kästen“ mit Spalten (`.zeile b { min-width: 5em }`), Rubriken mit Balken, Artikel mit Trennlinien. Titel 1.45em, damit „Lukas Morgenzeitung“ in eine Zeile passt. Keine Bilder (Graustufen-Gerät).
