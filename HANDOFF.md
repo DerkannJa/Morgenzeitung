@@ -70,7 +70,7 @@ Manche Lokalzeitungen liefern hinter der Paywall Platzhaltertext („Lorem ipsum
 `trafilatura.extract()` bekommt **Bytes** (`r.content`), nicht `r.text`. Sonst kommen bei Seiten ohne Charset-Header (z. B. heise) kaputte Umlaute („Ã¼“).
 
 ### 4.4 Flohmärkte (`termine_sammeln`, `termine_parsen`)
-Quelle: wöchentliche Übersicht „Flohmärkte, Märkte und Feste in Hessen“ der hessenschau, gefunden über `https://www.hessenschau.de/freizeit/index.rss` (Link enthält `flohmaerkte`). Parser zerlegt Text in Orts-Überschriften und Einträge, zwei Formate werden erkannt: „Datum“-Zeile + „- Text“-Zeile, oder „Datum - Text“ in einer Zeile. Ortsabgleich über `ort_treffer` („Rüsselsheim am Main“ passt zu „Rüsselsheim“, „Langenselbold“ nicht zu „Langen“). Abschnitt „Märkte und Feste“ nur mit `mit_maerkten = true`. Übersicht deckt immer nur bis zum kommenden Sonntag ab. **Nur mit nachgebauter Seite getestet** – Luka hatte beim ersten echten Lauf einen Fehler, den er selbst gefunden hat (Details unbekannt). Bei Problemen zuerst den echten Seitentext ansehen.
+Quelle: wöchentliche Übersicht „Flohmärkte, Märkte und Feste in Hessen“ der hessenschau, gefunden über `https://www.hessenschau.de/freizeit/index.rss` (Link enthält `flohmaerkte`). Parser zerlegt Text in Orts-Überschriften und Einträge, zwei Formate werden erkannt: „Datum“-Zeile + „- Text“-Zeile, oder „Datum - Text“ in einer Zeile. Ortsabgleich über `ort_treffer` („Rüsselsheim am Main“ passt zu „Rüsselsheim“, „Langenselbold“ nicht zu „Langen“). Abschnitt „Märkte und Feste“ nur mit `mit_maerkten = true`. Übersicht deckt immer nur bis zum kommenden Sonntag ab. Entwickelt mit einer nachgebauten Seite; das Problem beim ersten echten Lauf war laut Luka ein Eingabefehler seinerseits, kein Fehler im Parser. Ändert die hessenschau ihr Seitenformat, zuerst den echten Seitentext ansehen.
 
 Die Google-Rubrik „Flohmarkt-News“ liefert oft 0 Treffer (Google hält `when:14d` bei komplexen Suchen nicht ein, Treffer sind meist alt). Das ist erwartetes Verhalten; leere Rubriken entfallen automatisch.
 
@@ -110,7 +110,7 @@ Prüft nur Struktur und Layout; echte Feeds/Google/hessenschau verhalten sich an
 
 ## 7. Offene Punkte und Ideen
 
-- [ ] Prüfen, ob die Flohmarkt-Rubrik mit der echten hessenschau-Seite zuverlässig Treffer liefert (Lukas Fix von 13.11. nachvollziehen und ins Repo übernehmen).
+- [ ] Über einige Wochen beobachten, ob die Flohmarkt-Rubrik mit der echten hessenschau-Seite zuverlässig Treffer liefert.
 - [ ] Deployment per `git pull` statt ZIP (Deploy-Key im LXC, `update.sh` liest dann aus dem Checkout).
 - [ ] Lauf-Überwachung: bei Fehler im Timer-Lauf Push über Home Assistant (z. B. `OnFailure=` im Service → Webhook an HA).
 - [ ] Optional KI-Auswahl/Zusammenfassung (wie im Video): lokal über Ollama auf Lukas Desktop (RTX 3070 Ti, muss laufen) oder per API. Bisher bewusst ohne KI.
