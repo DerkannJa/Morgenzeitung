@@ -349,7 +349,7 @@ def gamepass_html(cfg, verlauf):
                  lang, len(unbekannt), ", ".join(unbekannt))
         zeilen = [f"<p class='zeile'><i>{esc(titel)}</i></p>"]
         for std, name, datum in sorted(kurz):
-            zeilen.append(f"<p class='zeile'><b>ca. {std:g} Std.</b> {esc(name)}"
+            zeilen.append(f"<p class='zeile'><b>ca. {round(std * 2) / 2:g} Std.</b> {esc(name)}"
                           f"{' <i>(bis ' + esc(datum) + ')</i>' if datum else ''}</p>")
         if not kurz:
             zeilen.append(f"<p class='zeile'>Kein Spiel mit 100 % in höchstens {max_h} Std.</p>")
