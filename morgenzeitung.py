@@ -272,10 +272,16 @@ def hltb_stunden(name):
     except ImportError:
         log.warning("howlongtobeatpy fehlt – pip install howlongtobeatpy")
         return None
-    versuche = [name]
-    if ":" in name:
-        versuche += [name.split(":", 1)[1].strip(), name.split(":", 1)[0].strip()]
-    versuche.append(re.sub(r"\s*\((Windows|PC|Xbox[^)]*|Console)\)", "", name))
+    name = re.sub(r"[’‘`´]", "'", name)
+    name = re.sub(r"\s*\((Windows|PC|Xbox[^)]*|Console)\)", "", name).strip()
+    ohne_zeichen = re.sub(r"\s+", " ", re.sub(r"[!?™®]", "", name)).strip()
+    versuche = [name, ohne_zeichen, ohne_zeichen.title()]
+    woerter = ohne_zeichen.split()
+    if len(woerter) > 2:   # Marken-Präfix wie "DreamWorks", "Disney", "Marvel's"
+        versuche.append(" ".join(woerter[1:]))
+    if ":" in ohne_zeichen:
+        vor, nach = (t.strip() for t in ohne_zeichen.split(":", 1))
+        versuche += [vor, nach]
     for v in dict.fromkeys(versuche):
         try:
             res = HowLongToBeat(0.5).search(v, similarity_case_sensitive=False)
@@ -285,6 +291,7 @@ def hltb_stunden(name):
         if res:
             best = max(res, key=lambda e: e.similarity)
             if best.completionist:
+                log.info("HowLongToBeat: %s -> %s, 100 %% in %s Std.", v, best.game_name, best.completionist)
                 return float(best.completionist), best.game_name
     return None
 
@@ -337,8 +344,9 @@ def gamepass_html(cfg, verlauf):
                 kurz.append((h[0], name, datum))
             else:
                 lang += 1
-        log.info("Game Pass: %d neue Spiele, %d bis %d Std., %d länger, %d ohne Zeit",
-                 len(spiele), len(kurz), max_h, lang, len(unbekannt))
+        log.info("Game Pass: %d neue Spiele, %d bis %d Std. (%s), %d länger, %d ohne Zeit (%s)",
+                 len(spiele), len(kurz), max_h, ", ".join(f"{k[1]} {k[0]:g} h" for k in sorted(kurz)),
+                 lang, len(unbekannt), ", ".join(unbekannt))
         zeilen = [f"<p class='zeile'><i>{esc(titel)}</i></p>"]
         for std, name, datum in sorted(kurz):
             zeilen.append(f"<p class='zeile'><b>ca. {std:g} Std.</b> {esc(name)}"
