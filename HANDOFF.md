@@ -102,6 +102,9 @@ AniList-GraphQL-API (`graphql.anilist.co`, ohne Schlüssel). Liest Lukas Liste �
 ### 4.6 Layout (Kindle 11. Gen, 6")
 CSS in `CSS` im Skript: linksbündig statt Blocksatz (Luka fand Blocksatz unschön), Zeitungskopf mit Linien, Titelseiten-„Kästen“ mit Spalten (`.zeile b { min-width: 5em }`), Rubriken mit Balken, Artikel mit Trennlinien. Titel 1.45em, damit „Lukas Morgenzeitung“ in eine Zeile passt. Keine Bilder (Graustufen-Gerät).
 
+### 4.8 Game Pass: schnelle 100 % (seit 17.11.2026)
+`[gamepass]` in `config.toml`, Funktion `gamepass_html()`. Google-News-Feed auf TA-Artikel mit „Game Pass“ + loses/leaving (`ABGANG_TITEL`). Artikel per trafilatura als Markdown mit Links → `abgang_spiele()` nimmt Listen unter Überschriften mit leav/lose/remov (Datum aus „on November 30“), Slug aus `/game/<Slug>`-Link oder geraten (`ta_slug`). `ta_stunden()` liest `/game/<Slug>/completiontime` („complete all N X achievements is A-B hours“), Fallback `/achievements` („takes around A-B hours“). Kasten auf der Titelseite mit Spielen, deren obere Schätzung ≤ `max_stunden` (10). Einmalig pro Artikel und pro Spiel (Verlauf-Keys `gamepass:` / `gamepass-spiel:`). TA-HTML konnte aus der Claude-Umgebung nicht geprüft werden (403) – Regex auf Text + Meta, im echten Lauf Log „Game Pass: …“ prüfen.
+
 ## 5. Updates (automatisch seit 17.11.2026)
 
 **Ein Push auf `main` reicht.** Der Service hat `ExecStartPre=-/usr/local/bin/zeitung-holen`: vor jedem Lauf (05:30) `git fetch` + `reset --hard origin/main`, `pip install -r requirements.txt`, dann Prüfung (`py_compile` des Skripts + `tomllib` der `config.toml`). Ist der neue Stand kaputt, wird auf den vorherigen Commit zurückgesetzt. Ist GitHub nicht erreichbar, läuft der bisherige Stand.

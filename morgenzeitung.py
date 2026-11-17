@@ -223,6 +223,135 @@ def anime_html(cfg):
     return "".join(out)
 
 
+# ---------------------------------------------------------------- Game Pass: schnelle 100 %
+TA = "https://www.trueachievements.com"
+STUNDEN_RE = re.compile(r"complete all\s+([\d,]+)\s+(.+?)\s+achievements is\s+(\d+)\s*(?:-|–|to)\s*(\d+)\s*hours?", re.I | re.S)
+STUNDEN_RE2 = re.compile(r"takes around\s+(\d+)\s*(?:-|–|to)\s*(\d+)\s*hours? to unlock all", re.I)
+ABGANG_TITEL = re.compile(r"game pass.*\b(loses|leaving|leave|losing)\b|\b(loses|leaving|losing)\b.*game pass", re.I)
+
+
+def ta_slug(name):
+    """TA-Adresse aus dem Spielnamen raten: 'Aliens: Dark Descent' -> 'Aliens-Dark-Descent'."""
+    name = name.replace("&", "and").replace("'", "").replace("’", "")
+    return re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-")
+
+
+def abgang_spiele(md):
+    """Spiele aus den Listen unter 'leaving'-Überschriften des Artikels (Markdown mit Links).
+    Gibt [(name, slug, datum_text)] zurück."""
+    spiele, aktiv, datum, irgendwo = [], False, "", []
+    for zeile in md.splitlines():
+        z = zeile.strip()
+        if z.startswith("#"):
+            aktiv = bool(re.search(r"leav|los(e|ing)|remov", z, re.I))
+            m = re.search(r"on\s+([A-Z][a-z]+\s+\d{1,2})", z)
+            datum = m.group(1) if m else ""
+            continue
+        m = re.match(r"[-*•]\s+(.*)", z)
+        if not m:
+            continue
+        eintrag = m.group(1)
+        link = re.search(r"\[([^\]]+)\]\((?:https?://www\.trueachievements\.com)?/game/([^/)\s?#]+)", eintrag)
+        if link:
+            name, slug = link.group(1), link.group(2)
+        else:
+            name = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", eintrag)
+            name = re.split(r"\s+[—–-]\s+|\s*\(", name)[0].strip(" *_")
+            slug = ta_slug(name)
+        if not name or len(name) > 80:
+            continue
+        (spiele if aktiv else irgendwo).append((name.strip(" *_"), slug, datum))
+    if not spiele:
+        spiele = irgendwo
+    eindeutig, slugs = [], set()
+    for s_ in spiele:
+        if s_[1].lower() not in slugs:
+            slugs.add(s_[1].lower())
+            eindeutig.append(s_)
+    return eindeutig[:25]
+
+
+def ta_stunden(slug):
+    """(von, bis, offizieller Name) laut TA-Schätzung für alle Erfolge, oder None."""
+    for pfad, muster in ((f"/game/{slug}/completiontime", STUNDEN_RE), (f"/game/{slug}/achievements", STUNDEN_RE2)):
+        try:
+            r = requests.get(TA + pfad, headers={"User-Agent": UA}, timeout=20)
+            if r.status_code != 200:
+                continue
+            text = re.sub(r"<[^>]+>", " ", r.text)
+            text = html.unescape(re.sub(r"\s+", " ", text + " " + r.text))  # Meta-Beschreibung mitprüfen
+            m = muster.search(text)
+            if m:
+                if muster is STUNDEN_RE:
+                    return int(m.group(3)), int(m.group(4)), m.group(2).strip()
+                return int(m.group(1)), int(m.group(2)), None
+            if re.search(r"less than (an|one) hour|0\s*-\s*1 hours?", text, re.I):
+                return 0, 1, None
+        except Exception as e:
+            log.info("TA-Zeit für %s nicht lesbar: %s", slug, e)
+    return None
+
+
+def gamepass_html(cfg, verlauf):
+    """Wenn TA einen Artikel über Game-Pass-Abgänge bringt: Spiele mit kurzer 100-%-Zeit auflisten."""
+    max_h = cfg.get("max_stunden", 10)
+    gefunden = []
+    for url in cfg.get("feeds", []):
+        for _, e, _ in feed_laden(url, dt.datetime.now(TZ) - dt.timedelta(hours=cfg.get("max_alter_stunden", 72))):
+            titel = html.unescape(e.get("title", ""))
+            titel = re.sub(r"\s+-\s+TrueAchievements$", "", titel)
+            if ABGANG_TITEL.search(titel):
+                gefunden.append((titel, e.get("link", "")))
+    out = []
+    for titel, link in gefunden[:2]:
+        key = "gamepass:" + titel.lower()
+        if verlauf.schon_gezeigt(key, None):
+            continue
+        echt = echter_link(link)
+        if not echt:
+            continue
+        try:
+            roh = requests.get(echt, headers={"User-Agent": UA}, timeout=20).content
+            md = trafilatura.extract(roh, url=echt, output_format="markdown", include_links=True,
+                                     include_tables=False, include_images=False) or ""
+        except Exception as ex:
+            log.info("Game-Pass-Artikel nicht lesbar: %s", ex)
+            continue
+        spiele = [sp for sp in abgang_spiele(md) if not verlauf.schon_gezeigt("gamepass-spiel:" + sp[1].lower(), None)]
+        if not spiele:
+            log.info("Game Pass: keine neuen Spiele in '%s'", titel)
+            continue
+        kurz, lang, unbekannt = [], 0, []
+        for name, slug, datum in spiele:
+            h = ta_stunden(slug)
+            if not h:
+                unbekannt.append(name)
+            elif h[1] <= max_h:
+                kurz.append((h[1], h[0], h[2] or name, datum))
+            else:
+                lang += 1
+        log.info("Game Pass: '%s' – %d Spiele, %d bis %d Std., %d ohne Schätzung",
+                 titel, len(spiele), len(kurz), max_h, len(unbekannt))
+        verlauf.merken(key, echt, {"titel": set(), "anfang": set()})
+        for sp in spiele:
+            verlauf.merken("gamepass-spiel:" + sp[1].lower(), None, {"titel": set(), "anfang": set()})
+        zeilen = [f"<p class='zeile'><i>{esc(titel)}</i></p>"]
+        for bis, von, name, datum in sorted(kurz):
+            zeilen.append(f"<p class='zeile'><b>{von}–{bis} Std.</b> {esc(name)}"
+                          f"{' <i>(bis ' + esc(datum) + ')</i>' if datum else ''}</p>")
+        if not kurz:
+            zeilen.append(f"<p class='zeile'>Kein Spiel unter {max_h} Std. für 100 %.</p>")
+        rest = []
+        if lang:
+            rest.append(f"{lang} länger")
+        if unbekannt:
+            rest.append("ohne Schätzung: " + ", ".join(unbekannt))
+        if rest:
+            zeilen.append(f"<p class='zeile'><i>Außerdem: {esc('; '.join(rest))}</i></p>")
+        out.append("".join(zeilen))
+    return "".join(out) or None
+
+
 # ---------------------------------------------------------------- Nachrichten
 def eintrag_zeit(e):
     for k in ("published_parsed", "updated_parsed"):
@@ -385,6 +514,7 @@ class Verlauf:
         return any(gleiches_thema(thema, t) for t in self.themen)
 
     def merken(self, key, url, thema):
+        self.keys.add(key)
         self.neu.append({"datum": dt.date.today().isoformat(), "key": key, "url": url,
                          "titel": sorted(thema["titel"]), "anfang": sorted(thema.get("anfang", set()))})
 
@@ -866,6 +996,13 @@ def zeitung_bauen(cfg):
             log.warning("Anime (AniList) nicht verfügbar: %s", e)
 
     verlauf = Verlauf(z.get("verlauf_datei"), z.get("verlauf_tage", 21))
+    if cfg.get("gamepass"):
+        try:
+            gp = gamepass_html(cfg["gamepass"], verlauf)
+            if gp:
+                kasten(f"Game Pass: schnelle 100 % (bis {cfg['gamepass'].get('max_stunden', 10)} Std.)", gp)
+        except Exception as e:
+            log.warning("Game-Pass-Kasten nicht verfügbar: %s", e)
     kapitel, uebersicht, gesehen, ausgabe = [], [], set(), []
     for i, r in enumerate(cfg.get("rubrik", [])):
         if r.get("typ") == "hessenschau_termine":

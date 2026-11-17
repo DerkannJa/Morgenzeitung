@@ -104,6 +104,42 @@ for a, b, rub, erwartet in [
     pruefe(m.gleiches_thema(th(a, rub), th(b, rub)) == erwartet,
            f"{'gleiches' if erwartet else 'anderes'} Thema: {a!r} / {b!r}")
 
+# 5) Game Pass: Spieleliste aus TA-Artikel und Stunden von der TA-Seite
+md = """# Xbox Game Pass loses eight more games at the end of November
+Xbox has now revealed the second wave of games leaving Xbox Game Pass.
+## Games leaving Xbox Game Pass and PC Game Pass on November 30
+- [Aliens: Dark Descent](https://www.trueachievements.com/game/Aliens-Dark-Descent) (Cloud, Console, PC)
+- Moving Out 2 (Cloud, Console, PC)
+- DreamWorks Gabby's Dollhouse: Ready to Party
+- [Totally Reliable Delivery Service](/game/Totally-Reliable-Delivery-Service)
+## New games joining Game Pass
+- [High on Life 2](/game/High-on-Life-2)
+"""
+sp = m.abgang_spiele(md)
+pruefe([x[1] for x in sp] == ["Aliens-Dark-Descent", "Moving-Out-2", "DreamWorks-Gabbys-Dollhouse-Ready-to-Party",
+                              "Totally-Reliable-Delivery-Service"], f"Game-Pass-Liste: {[x[1] for x in sp]}")
+pruefe(all(x[2] == "November 30" for x in sp), "Game-Pass-Abgangsdatum")
+pruefe(bool(m.ABGANG_TITEL.search("Xbox Game Pass loses eight more games at the end of November")), "Titel erkannt")
+pruefe(not m.ABGANG_TITEL.search("Xbox Game Pass confirms second wave of new games for November"), "Zugangs-Titel ignoriert")
+
+
+class Antw:
+    def __init__(self, text, code=200):
+        self.text, self.status_code = text, code
+
+
+seiten = {
+    "/game/Moving-Out-2/completiontime": "<p>The estimated time to complete all 52 <b>Moving Out 2</b> achievements is 15-20 hours.</p>",
+    "/game/Gabby/completiontime": "",
+    "/game/Gabby/achievements": "<meta content='It takes around 1-2 hours to unlock all of the achievements on Xbox Series X|S.'>",
+}
+alt_get = m.requests.get
+m.requests.get = lambda url, **k: Antw(seiten.get(url.replace(m.TA, ""), ""), 200 if url.replace(m.TA, "") in seiten else 404)
+pruefe(m.ta_stunden("Moving-Out-2") == (15, 20, "Moving Out 2"), "TA-Stunden aus completiontime")
+pruefe(m.ta_stunden("Gabby") == (1, 2, None), "TA-Stunden aus achievements")
+pruefe(m.ta_stunden("Gibtsnicht") is None, "TA-Stunden fehlen")
+m.requests.get = alt_get
+
 print()
 print("Alles in Ordnung." if not FEHLER else f"{len(FEHLER)} Fehler.")
 sys.exit(1 if FEHLER else 0)

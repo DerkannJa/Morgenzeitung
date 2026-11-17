@@ -33,6 +33,14 @@ feiertage_tage = 7                 # Feiertage so viele Tage im Voraus anzeigen
 anilist_nutzer = "drkR4i"
 titel = "romaji"                   # "romaji" (z. B. Sousou no Frieren) oder "english"
 
+[gamepass]
+# Bringt TrueAchievements einen Artikel "Xbox Game Pass loses/leaving ...", erscheint auf der
+# Titelseite einmalig ein Kasten mit den Spielen, deren 100 % laut TA-Schätzung höchstens
+# max_stunden dauern (obere Grenze der Schätzung, z. B. "8-10 Std." zählt bei 10 mit).
+feeds = ["https://news.google.com/rss/search?q=site:trueachievements.com+%22game+pass%22+(loses+OR+leaving)+when:3d&hl=en-US&gl=US&ceid=US:en"]
+max_stunden = 10
+max_alter_stunden = 72
+
 # ---------------------------------------------------------------
 # Rubriken: Reihenfolge = Reihenfolge in der Zeitung
 #   anzahl     = maximale Artikel aus dieser Rubrik
