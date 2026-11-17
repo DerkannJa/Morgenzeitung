@@ -6,6 +6,8 @@ titel = "Lukas Morgenzeitung"
 ausgabe_ordner = "/opt/morgenzeitung/ausgaben"
 max_woerter_pro_artikel = 900     # lange Artikel werden gekürzt
 behalten_tage = 14                 # alte EPUBs danach löschen
+verlauf_datei = "/opt/morgenzeitung/verlauf.json"   # merkt sich gezeigte Berichte
+verlauf_tage = 21                  # so lange gilt ein Bericht/Thema als "schon gelesen"
 
 [mail]
 smtp_server = "smtp.gmail.com"
@@ -37,6 +39,10 @@ titel = "romaji"                   # "romaji" (z. B. Sousou no Frieren) oder "en
 #                false: nur Überschrift + Kurztext
 #   nur_mit_text = true: Meldungen ohne lesbaren Artikeltext überspringen
 #   max_woerter  = Kürzungsgrenze nur für diese Rubrik
+#   stichwoerter = nur Berichte, die mindestens eines dieser Wörter enthalten
+#   ausschluss   = Berichte mit einem dieser Wörter fliegen raus
+# Berichte, die schon in einer früheren Ausgabe standen, und Berichte zum selben
+# Thema (auch aus anderer Quelle) erscheinen nur einmal.
 #   max_alter_stunden = ältere Meldungen werden ignoriert
 # Google-News-Suche als Feed:
 #   https://news.google.com/rss/search?q=SUCHBEGRIFF&hl=de&gl=DE&ceid=DE:de
@@ -59,6 +65,8 @@ volltext = true          # Artikeltext laden (Google-News-Links werden aufgelös
 nur_mit_text = true      # Meldungen ohne lesbaren Text überspringen (z. B. Bezahlschranke)
 max_woerter = 500
 max_alter_stunden = 72
+# Ortsnamen stehen in fast jedem Lokaltitel und zählen beim Themenvergleich nicht
+themen_ignorieren = ["Mörfelden", "Walldorf", "Mörfelden-Walldorf", "Groß-Gerau", "Gerau", "Südhessen", "Hessen", "Darmstadt", "Frankfurt", "Rüsselsheim", "Langen", "Kelsterbach"]
 
 [[rubrik]]
 name = "Flohmärkte"
@@ -133,6 +141,7 @@ volltext = true
 nur_mit_text = true
 max_woerter = 400
 max_alter_stunden = 30
+ausschluss = ["Eishockey", "Penny DEL", "DEL2", "Spieltag", "Bundesliga", "Champions League", "Fußball", "Handball", "Basketball", "Tabellenführer", "Eisbären", "Adler Mannheim", "Löwen Frankfurt", "Kölner Haie", "Pinguins", "Grizzlys"]
 
 [[rubrik]]
 name = "Neue Releases"
@@ -143,6 +152,8 @@ volltext = true
 nur_mit_text = true
 max_woerter = 400
 max_alter_stunden = 168
+stichwoerter = ["PS5", "PlayStation", "Xbox", "Nintendo", "Switch", "Steam", "PC", "Game Pass", "Videospiel", "Videospiele", "Games", "Gaming", "Konsole", "Konsolen", "Early Access", "DLC"]
+ausschluss = ["Eishockey", "Penny DEL", "DEL2", "Spieltag", "Bundesliga", "Champions League", "Fußball", "Handball", "Basketball", "Tabellenführer", "Eisbären", "Adler Mannheim", "Löwen Frankfurt", "Kölner Haie", "Pinguins", "Grizzlys"]
 
 [[rubrik]]
 name = "TrueAchievements & Gamerscore"
@@ -156,9 +167,11 @@ max_alter_stunden = 168
 
 [[rubrik]]
 name = "Rocket League"
-feeds = ["https://news.google.com/rss/search?q=%22Rocket+League%22+when:3d&hl=en-US&gl=US&ceid=US:en"]
+feeds = ["https://news.google.com/rss/search?q=%22Rocket+League%22+-college+-collegiate+when:3d&hl=en-US&gl=US&ceid=US:en"]
 anzahl = 3
 volltext = true
 nur_mit_text = true
 max_woerter = 400
 max_alter_stunden = 72
+ausschluss = ["college", "collegiate", "CRL", "university", "universities", "NCAA", "NACE", "scholarship", "high school", "varsity", "campus"]
+

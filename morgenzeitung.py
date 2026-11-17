@@ -291,50 +291,241 @@ def echter_link(url):
     return None
 
 
+# ---------------------------------------------------------------- Themen & Verlauf
+STOPPWOERTER = set("""
+aber alle allem allen aller alles also auch auf aus bei beim bereits bis bisher dabei damit dann
+darauf darum dass dazu dem den denen denn der deren des dessen die dies diese diesem diesen dieser
+dieses doch dort durch eine einem einen einer eines einmal etwa euch fast für gegen hatte hatten
+hier hinter immer ihre ihrem ihren ihrer jetzt kann kein keine können könnte machen mehr mehrere
+mich mit nach neue neuen neuer neues nicht noch nun nur oder ohne schon sehr seid sein seine seinem
+seinen seiner seit sich sie sind soll sollen sowie über um und uns unter viel viele vom von vor
+wann war waren warum was weil weiter weitere wenn werden wieder wird wurde wurden zum zur zwei
+heute gestern morgen woche jahr jahre jahren uhr prozent laut sagt sagte erste ersten neu
+about after again also been before being between both could each from have here into just like
+make more most much must only other over said same should some such than that their them then
+there these they this those through under very week what when where which while will with would
+your year years today first news update updates report reports says
+januar februar märz april juni juli august september oktober november dezember montag dienstag
+mittwoch donnerstag freitag samstag sonntag spiel spiele game games kommen kommt gibt startet
+stellt bringt zeigt plant diese dieses stadt kreis landkreis gemeinde region
+""".split())
+
+
+def themen_woerter(text):
+    """Bedeutungstragende Wörter eines Textes, grob auf den Wortstamm gekürzt."""
+    woerter = set()
+    text = text or ""
+    # Abkürzungen (GDL, RTX, DEL, KI) zählen trotz Kürze mit
+    abk = {w.lower() for w in re.findall(r"\b[A-ZÄÖÜ]{2,5}\b", text)}
+    for w in re.findall(r"[a-zäöüß0-9]+", text.lower()):
+        if w in abk and w not in STOPPWOERTER:
+            woerter.add(w)
+            continue
+        if w.isdigit():
+            if len(w) >= 2:
+                woerter.add(w)  # Versionsnummern, Jahreszahlen
+            continue
+        if len(w) < 4 or w in STOPPWOERTER:
+            continue
+        for endung in ("ungen", "ung", "ern", "en", "er", "es", "e", "s", "n"):
+            if len(w) > 6 and w.endswith(endung):
+                w = w[: -len(endung)]
+                break
+        woerter.add(w)
+    return woerter
+
+
+def _ueberlappung(a, b):
+    if min(len(a), len(b)) < 3:
+        return 0.0
+    return len(a & b) / min(len(a), len(b))
+
+
+def _jaccard(a, b):
+    if len(a) < 10 or len(b) < 10:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def gleiches_thema(a, b):
+    """a, b: dict mit 'titel' (Wortmenge) und 'anfang' (Wortmenge der ersten ~80 Wörter)."""
+    ta, tb = a["titel"], b["titel"]
+    if min(len(ta), len(tb)) == 2 and len(ta & tb) == 2:
+        return True  # kurzer Titel steckt komplett im anderen
+    ov = _ueberlappung(ta, tb)
+    if ov >= 0.6 or (ov >= 0.5 and min(len(a["titel"]), len(b["titel"])) >= 4):
+        return True
+    lj = _jaccard(a.get("anfang", set()), b.get("anfang", set()))
+    return lj >= 0.3 or (ov >= 0.4 and lj >= 0.18)
+
+
+class Verlauf:
+    """Merkt sich, welche Berichte (und Themen) schon in einer verschickten Ausgabe standen."""
+
+    def __init__(self, pfad, tage=21):
+        self.pfad = Path(pfad) if pfad else None
+        self.eintraege = []
+        self.neu = []
+        if self.pfad and self.pfad.exists():
+            try:
+                daten = json.loads(self.pfad.read_text(encoding="utf-8"))
+                grenze = (dt.date.today() - dt.timedelta(days=tage)).isoformat()
+                self.eintraege = [e for e in daten if e.get("datum", "") >= grenze]
+            except Exception as ex:
+                log.warning("Verlauf nicht lesbar, starte leer: %s", ex)
+        self.urls = {e.get("url") for e in self.eintraege if e.get("url")}
+        self.keys = {e.get("key") for e in self.eintraege}
+        self.themen = [{"titel": set(e.get("titel", [])), "anfang": set(e.get("anfang", []))}
+                       for e in self.eintraege]
+
+    def schon_gezeigt(self, key, url):
+        return key in self.keys or (url and url in self.urls)
+
+    def thema_bekannt(self, thema):
+        return any(gleiches_thema(thema, t) for t in self.themen)
+
+    def merken(self, key, url, thema):
+        self.neu.append({"datum": dt.date.today().isoformat(), "key": key, "url": url,
+                         "titel": sorted(thema["titel"]), "anfang": sorted(thema.get("anfang", set()))})
+
+    def speichern(self):
+        if not self.pfad or not self.neu:
+            return
+        self.pfad.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.pfad.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.eintraege + self.neu, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self.pfad)
+        log.info("Verlauf: %d neue Berichte gemerkt (%d insgesamt)", len(self.neu),
+                 len(self.eintraege) + len(self.neu))
+
+
+def wort_re(woerter):
+    return re.compile(r"\b(" + "|".join(re.escape(w) for w in woerter) + r")\b", re.I) if woerter else None
+
+
+# ---------------------------------------------------------------- Volltext
+# Hinweise, dass der Artikel hinter einer Bezahlschranke steckt
+PAYWALL_TEXT = re.compile(
+    r"lorem ipsum|consetetur sadipscing|um alles zu lesen|um den (ganzen|vollständigen) artikel zu lesen|"
+    r"um weiterzulesen|jetzt weiterlesen mit|weiterlesen mit (plus|abo|\w+\+)|artikel freischalten|"
+    r"exklusiv für abonnent|nur für abonnent|für abonnenten verfügbar|mit einem abo|"
+    r"jetzt abo abschließen|zugang zu allen (artikeln|inhalten)|sie sind bereits abonnent|"
+    r"bereits abonnent\?|plus-artikel|dieser artikel ist exklusiv|"
+    r"subscribe to (continue|read|keep reading)|to continue reading|this article is for subscribers|"
+    r"pay to read|subscribers only|already a subscriber", re.I)
+PAYWALL_HTML = re.compile(r'"isAccessibleForFree"\s*:\s*"?false', re.I)
+# Bildunterschriften, Bildnachweise und ähnliches vor dem Extrahieren entfernen
+BILD_KLASSEN = re.compile(r"caption|credit|copyright|bildunterschrift|bildnachweis|image-?source|"
+                          r"media-?description|photo-?info", re.I)
+BILDNACHWEIS = re.compile(r"^(foto|fotos|bild|bilder|quelle|grafik|video|image|photo|credit)s?\s*[:|/©]|^©|"
+                          r"\((foto|bild)\s*:", re.I)
+
+
+class Paywall(Exception):
+    pass
+
+
+def html_saeubern(roh):
+    """Entfernt Abbildungen samt Bildunterschriften, bevor trafilatura den Text herauszieht."""
+    try:
+        from lxml import html as lhtml
+        baum = lhtml.fromstring(roh)
+        for el in baum.xpath("//figure|//figcaption|//picture|//img|//video|//aside"):
+            el.drop_tree()
+        for el in baum.xpath("//*[@class or @id]"):
+            if BILD_KLASSEN.search((el.get("class") or "") + " " + (el.get("id") or "")):
+                el.drop_tree()
+        return lhtml.tostring(baum, encoding="unicode")
+    except Exception as ex:
+        log.info("HTML-Säuberung übersprungen: %s", ex)
+        return roh
+
+
 def volltext(url, max_woerter):
+    """Gibt {'html', 'woerter', 'anfang'} zurück, None wenn kein brauchbarer Text,
+    oder wirft Paywall, wenn der Artikel hinter einer Bezahlschranke steckt."""
     if not trafilatura or not url:
         return None
     try:
         r = requests.get(url, headers={"User-Agent": UA}, timeout=20)
         r.raise_for_status()
-        txt = trafilatura.extract(r.content, include_comments=False, include_tables=False,
-                                  favor_precision=True)
+        roh = r.content
+    except Exception as e:
+        log.info("Volltext fehlgeschlagen (%s): %s", url, e)
+        return None
+    kopf = roh[:400000].decode("utf-8", "ignore")
+    if PAYWALL_HTML.search(kopf):
+        raise Paywall(url)
+    try:
+        # Bytes an trafilatura geben (Kodierung aus der Seite); Bildunterschriften vorher entfernen
+        sauber = html_saeubern(roh)
+        txt = trafilatura.extract(sauber, output_format="markdown", include_formatting=True,
+                                  include_comments=False, include_tables=False, include_images=False,
+                                  include_links=False, favor_precision=True)
     except Exception as e:
         log.info("Volltext fehlgeschlagen (%s): %s", url, e)
         return None
     if not txt:
         return None
-    # Bezahlschranken liefern oft Platzhaltertext ("Lorem ipsum ...") statt des Artikels.
-    # Alles ab dem ersten Platzhalter-Absatz verwerfen; bleibt zu wenig übrig -> kein Volltext.
-    zeilen, bezahlschranke = [], False
-    for p in txt.split("\n"):
-        if re.search(r"lorem ipsum|consetetur sadipscing|dolor sit amet", p, re.I):
-            bezahlschranke = True
-            break
-        zeilen.append(p)
-    txt = "\n".join(zeilen)
-    if len(txt.split()) < 60:
-        if bezahlschranke:
-            log.info("Bezahlschranke erkannt, Artikel übersprungen: %s", url)
-        return None
-    absaetze, woerter = [], 0
-    for p in txt.split("\n"):
-        p = p.strip()
-        if not p:
+    if PAYWALL_TEXT.search(txt):
+        raise Paywall(url)
+
+    # Absätze aufbereiten: Bildnachweise raus, inhaltliche Doppelungen raus
+    bloecke, gesehen = [], []
+    for zeile in txt.split("\n"):
+        z = zeile.strip()
+        if not z:
             continue
-        n = len(p.split())
-        if woerter + n > max_woerter:
+        z = re.sub(r"\*\*|__", "", z)
+        if z.startswith("#"):
+            bloecke.append(("h", z.lstrip("#").strip()))
+            continue
+        liste = z.startswith(("- ", "* ", "• "))
+        if liste:
+            z = z[2:].strip()
+        z = re.sub(r"(?<!\w)[*_](?!\s)(.+?)(?<!\s)[*_](?!\w)", r"\1", z)
+        if BILDNACHWEIS.search(z) or (len(z.split()) < 5 and not liste and not z.endswith((".", "!", "?", ":"))):
+            continue
+        w = themen_woerter(z)
+        if len(w) >= 4 and any(len(w & g) / len(w | g) >= 0.6 for g in gesehen):
+            continue  # inhaltlich fast gleich wie ein früherer Absatz (typisch: Bildunterschrift)
+        gesehen.append(w)
+        bloecke.append(("li" if liste else "p", z))
+
+    gesamt = sum(len(t.split()) for art, t in bloecke if art != "h")
+    if gesamt < 60:
+        return None
+
+    teile, woerter, offen_liste, erster = [], 0, False, True
+    for art, t in bloecke:
+        if art != "li" and offen_liste:
+            teile.append("</ul>")
+            offen_liste = False
+        n = len(t.split())
+        if art != "h" and woerter + n > max_woerter:
             rest = max(0, max_woerter - woerter)
             if rest > 15:
-                absaetze.append(f"<p>{esc(' '.join(p.split()[:rest]))} …</p>")
-            absaetze.append("<p class='gekuerzt'>(gekürzt)</p>")
+                teile.append(f"<p>{esc(' '.join(t.split()[:rest]))} …</p>")
+            teile.append("<p class='gekuerzt'>(gekürzt)</p>")
             break
-        absaetze.append(f"<p>{esc(p)}</p>")
+        if art == "h":
+            if woerter:  # Zwischenüberschrift nur innerhalb des Textes, nicht als Doppel-Titel
+                teile.append(f"<h4>{esc(t)}</h4>")
+            continue
+        if art == "li":
+            if not offen_liste:
+                teile.append("<ul>")
+                offen_liste = True
+            teile.append(f"<li>{esc(t)}</li>")
+        else:
+            teile.append(f"<p class='lead'>{esc(t)}</p>" if erster else f"<p>{esc(t)}</p>")
+            erster = False
         woerter += n
-    else:
-        if bezahlschranke:
-            absaetze.append("<p class='gekuerzt'>(Rest hinter Bezahlschranke)</p>")
-    return "".join(absaetze)
+    if offen_liste:
+        teile.append("</ul>")
+    klartext = " ".join(t for art, t in bloecke if art != "h")
+    return {"html": "".join(teile), "woerter": gesamt,
+            "anfang": themen_woerter(" ".join(klartext.split()[:80]))}
 
 
 def feed_laden(url, grenze):
@@ -355,52 +546,99 @@ def feed_laden(url, grenze):
     return eintraege
 
 
-def rubrik_sammeln(r, gesehen, max_woerter):
+def rubrik_sammeln(r, gesehen, max_woerter, verlauf, ausgabe):
+    """gesehen: Titel-Schlüssel dieser Ausgabe; verlauf: frühere Ausgaben;
+    ausgabe: Themen dieser Ausgabe (für Themen-Duplikate über Rubriken hinweg)."""
     grenze = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=r.get("max_alter_stunden", 48))
     max_woerter = r.get("max_woerter", max_woerter)
     nur_mit_text = r.get("nur_mit_text", False)
-    woerter = r.get("stichwoerter") or []
-    stichwort_re = re.compile(r"\b(" + "|".join(re.escape(w) for w in woerter) + r")\b", re.I) if woerter else None
+    stichwort_re = wort_re(r.get("stichwoerter"))
+    ausschluss_re = wort_re(r.get("ausschluss"))
     # Feeds abwechselnd durchgehen, damit jede Quelle zum Zug kommt
     listen = [feed_laden(u, grenze) for u in r["feeds"]]
     kandidaten = []
     for i in range(max((len(l) for l in listen), default=0)):
         kandidaten += [l[i] for l in listen if i < len(l)]
 
-    artikel = []
-    versuche = 0
+    artikel, versuche, gruende = [], 0, {}
+    # Wörter, die in fast jedem Titel der Rubrik stehen ("Rocket League"), zählen beim Themenvergleich nicht
+    rubrik_woerter = themen_woerter(r["name"] + " " + " ".join(r.get("themen_ignorieren", [])))
+
+    def weg(grund):
+        gruende[grund] = gruende.get(grund, 0) + 1
+
     for zeit, e, feedtitel in kandidaten:
-        if len(artikel) >= r.get("anzahl", 5) or versuche >= r.get("anzahl", 5) * 3:
+        if len(artikel) >= r.get("anzahl", 5) or versuche >= r.get("anzahl", 5) * 4:
             break
         key = titel_norm(e.get("title"))
+        link = e.get("link", "")
         if not key or key in gesehen:
             continue
+        if verlauf.schon_gezeigt(key, link):
+            weg("schon gelesen")
+            continue
         titel = html.unescape(e.get("title", "")).strip()
-        if stichwort_re and not stichwort_re.search(titel + " " + (e.get("summary") or "")):
-            continue  # passt zu keinem Stichwort der Rubrik
         quelle = (e.get("source") or {}).get("title") or feedtitel
         if quelle and titel.endswith(" - " + quelle):
             titel = titel[: -len(quelle) - 3]
-        body = None
+        kurztext = text_kurz(e.get("summary") or e.get("description"), 120)
+        if ausschluss_re and ausschluss_re.search(titel + " " + kurztext):
+            weg("Ausschlusswort")
+            continue
+        thema = {"titel": themen_woerter(titel) - rubrik_woerter, "anfang": set()}
+        if verlauf.thema_bekannt(thema) or any(gleiches_thema(thema, t) for t in ausgabe):
+            weg("Thema schon da")
+            continue
+
+        body, woerter, echt = None, 0, link
         if r.get("volltext"):
             versuche += 1
-            body = volltext(echter_link(e.get("link", "")), max_woerter)
+            echt = echter_link(link) or link
+            if echt != link and verlauf.schon_gezeigt(key, echt):
+                weg("schon gelesen")
+                continue
+            try:
+                vt = volltext(echt, max_woerter)
+            except Paywall:
+                log.info("Bezahlschranke, übersprungen: %s", echt)
+                weg("Bezahlschranke")
+                continue
+            if vt:
+                body, woerter, thema["anfang"] = vt["html"], vt["woerter"], vt["anfang"]
         if not body:
-            kurz = text_kurz(e.get("summary") or e.get("description"), 120)
-            if kurz and titel_norm(kurz) != key and not kurz.startswith(titel[:40]):
-                body = f"<p>{esc(kurz)}</p>"
+            if kurztext and titel_norm(kurztext) != key and not kurztext.startswith(titel[:40]):
+                body = f"<p class='lead'>{esc(kurztext)}</p>"
+                woerter = len(kurztext.split())
+                thema["anfang"] = themen_woerter(kurztext)
             else:
                 body = ""
-        if nur_mit_text and len(re.sub(r"<[^>]+>", " ", body).split()) < 25:
+        if nur_mit_text and woerter < 25:
+            weg("kein lesbarer Text")
             continue  # nur Überschrift -> überspringen, nächsten Artikel nehmen
+        volltext_klar = re.sub(r"<[^>]+>", " ", body)
+        if stichwort_re and not stichwort_re.search(titel + " " + kurztext + " " + volltext_klar):
+            weg("kein Stichwort")
+            continue
+        if ausschluss_re and ausschluss_re.search(volltext_klar):
+            weg("Ausschlusswort")
+            continue
+        if thema["anfang"] and (verlauf.thema_bekannt(thema) or any(gleiches_thema(thema, t) for t in ausgabe)):
+            weg("Thema schon da")
+            continue
         gesehen.add(key)
+        ausgabe.append(thema)
+        verlauf.merken(key, echt, thema)
+        if echt != link:
+            verlauf.merken(key, link, thema)
         artikel.append({
             "titel": titel,
             "quelle": quelle,
             "zeit": zeit.astimezone(TZ),
             "body": body,
+            "lesezeit": max(1, round(woerter / 200)) if woerter >= 150 else 0,
         })
-    log.info("Rubrik %s: %d Artikel", r["name"], len(artikel))
+    weg_text = ", ".join(f"{n}× {g}" for g, n in gruende.items())
+    log.info("Rubrik %s: %d Artikel%s", r["name"], len(artikel), f" (aussortiert: {weg_text})" if weg_text else "")
     return artikel
 
 
@@ -457,7 +695,7 @@ def termine_parsen(text, orte, mit_maerkten=False):
     return ergebnis
 
 
-def termine_sammeln(r):
+def termine_sammeln(r, verlauf):
     """Rubrik-Typ 'hessenschau_termine': aktuelle Flohmarkt-Übersicht laden und nach Orten filtern."""
     grenze = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=8)
     seite = None
@@ -469,6 +707,9 @@ def termine_sammeln(r):
         log.info("Rubrik %s: keine aktuelle Terminübersicht gefunden", r["name"])
         return []
     zeit, e = seite
+    if verlauf.schon_gezeigt(None, e["link"]):
+        log.info("Rubrik %s: Übersicht dieser Woche schon gezeigt", r["name"])
+        return []
     try:
         resp = requests.get(e["link"], headers={"User-Agent": UA}, timeout=20)
         resp.raise_for_status()
@@ -487,6 +728,7 @@ def termine_sammeln(r):
             body.append(f"<p class='zeile'><b>{esc(ort)}</b> {esc(eintrag)}</p>")
     titel = html.unescape(e.get("title", "Flohmärkte")).strip()
     log.info("Rubrik %s: %d Termine", r["name"], len(body))
+    verlauf.merken("termine:" + e["link"], e["link"], {"titel": set(), "anfang": set()})
     return [{"titel": titel, "quelle": "hessenschau.de", "zeit": zeit.astimezone(TZ), "body": "".join(body)}]
 
 
@@ -520,6 +762,10 @@ p { margin: 0 0 0.6em 0; text-indent: 0; text-align: left; hyphens: auto; -webki
 .artikel.letzter { border-bottom: none; }
 .artikel h3 { font-size: 1.1em; font-weight: bold; line-height: 1.25; text-align: left; margin: 0 0 0.2em; }
 .meta { font-size: 0.75em; color: #555; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.5em; }
+.lead { font-weight: bold; }
+.artikel h4 { font-size: 1em; font-weight: bold; margin: 0.8em 0 0.3em; }
+.artikel ul { margin: 0 0 0.6em 1.2em; padding: 0; }
+.artikel li { margin: 0 0 0.25em; text-align: left; }
 .gekuerzt { font-size: 0.8em; font-style: italic; color: #555; }
 .ende { text-align: center; margin-top: 2em; font-size: 0.85em; letter-spacing: 0.15em; }
 """
@@ -619,12 +865,13 @@ def zeitung_bauen(cfg):
         except Exception as e:
             log.warning("Anime (AniList) nicht verfügbar: %s", e)
 
-    kapitel, uebersicht, gesehen = [], [], set()
+    verlauf = Verlauf(z.get("verlauf_datei"), z.get("verlauf_tage", 21))
+    kapitel, uebersicht, gesehen, ausgabe = [], [], set(), []
     for i, r in enumerate(cfg.get("rubrik", [])):
         if r.get("typ") == "hessenschau_termine":
-            artikel = termine_sammeln(r)
+            artikel = termine_sammeln(r, verlauf)
         else:
-            artikel = rubrik_sammeln(r, gesehen, max_w)
+            artikel = rubrik_sammeln(r, gesehen, max_w, verlauf, ausgabe)
         if not artikel:
             continue
         datei = f"r{i:02d}.xhtml"
@@ -632,7 +879,8 @@ def zeitung_bauen(cfg):
         for n, a in enumerate(artikel):
             klasse = "artikel letzter" if n == len(artikel) - 1 else "artikel"
             teile.append(f"<div class='{klasse}'><h3>{esc(a['titel'])}</h3>"
-                         f"<p class='meta'>{esc(a['quelle'])} · {a['zeit']:%d.%m., %H:%M} Uhr</p>"
+                         f"<p class='meta'>{esc(a['quelle'])} · {a['zeit']:%d.%m., %H:%M} Uhr"
+                         f"{' · ca. ' + str(a['lesezeit']) + ' Min.' if a.get('lesezeit') else ''}</p>"
                          f"{a['body']}</div>")
         kapitel.append((datei, r["name"], "".join(teile)))
         uebersicht.append(f"<p class='zeile'><a href='{datei}'><b>{esc(r['name'])}</b></a></p>")
@@ -653,7 +901,7 @@ def zeitung_bauen(cfg):
     for alt in ordner.glob("Morgenzeitung_*.epub"):
         if dt.datetime.fromtimestamp(alt.stat().st_mtime, TZ) < heute - dt.timedelta(days=tage):
             alt.unlink()
-    return pfad
+    return pfad, verlauf
 
 
 def senden(cfg, pfad):
@@ -676,13 +924,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=str(Path(__file__).with_name("config.toml")))
     ap.add_argument("--nosend", action="store_true")
+    ap.add_argument("--merken", action="store_true", help="mit --nosend: Berichte trotzdem als gelesen merken")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     with open(args.config, "rb") as f:
         cfg = tomllib.load(f)
-    pfad = zeitung_bauen(cfg)
+    pfad, verlauf = zeitung_bauen(cfg)
     if not args.nosend:
         senden(cfg, pfad)
+        verlauf.speichern()  # erst nach erfolgreichem Versand merken
+    elif args.merken:
+        verlauf.speichern()
 
 
 if __name__ == "__main__":

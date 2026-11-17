@@ -1,4 +1,4 @@
-# Übergabe: Morgenzeitung – Stand 15.11.2026
+# Übergabe: Morgenzeitung – Stand 17.11.2026
 
 Diese Datei ist der Einstiegspunkt für jede weitere Arbeit an der Morgenzeitung. Sie beschreibt, was gebaut ist, wie es bei Luka läuft, was bekannt wackelig ist und was als Nächstes ansteht. Wer weiterarbeitet (Luka oder Claude in einem neuen Chat), sollte diese Datei zuerst komplett lesen.
 
@@ -55,7 +55,9 @@ Aufruf: `morgenzeitung.py` (bauen + senden), `--nosend` (nur bauen), `--config P
 | `nur_mit_text` | Meldungen ohne lesbaren Text (< 25 Wörter) überspringen |
 | `max_woerter` | Kürzungsgrenze für diese Rubrik (sonst global `max_woerter_pro_artikel`) |
 | `max_alter_stunden` | ältere Meldungen ignorieren |
-| `stichwoerter` | nur Einträge, deren Titel/Kurztext ein Stichwort enthält (Wortgrenzen, case-insensitive) |
+| `stichwoerter` | nur Einträge, deren Titel, Kurztext oder Artikeltext ein Stichwort enthält (Wortgrenzen, case-insensitive) |
+| `ausschluss` | Einträge mit einem dieser Wörter in Titel, Kurztext oder Artikeltext fliegen raus (z. B. College bei Rocket League, Eishockey bei Gaming) |
+| `themen_ignorieren` | Wörter, die beim Themenvergleich nicht zählen (z. B. Ortsnamen bei Lokales); der Rubrikname zählt automatisch nicht |
 | `typ = "hessenschau_termine"` + `orte` + `mit_maerkten` | Flohmarkt-Terminübersicht der hessenschau, gefiltert nach Orten |
 
 ## 4. Besonderheiten und warum sie so gebaut sind
@@ -63,8 +65,11 @@ Aufruf: `morgenzeitung.py` (bauen + senden), `--nosend` (nur bauen), `--config P
 ### 4.1 Google-News-Links auflösen (`echter_link`, `google_link_aufloesen`)
 Google-News-RSS liefert nur verschlüsselte Weiterleitungslinks. Aus Deutschland antwortet Google mit 302 auf die Cookie-Zustimmung. Lösung: eigene Implementierung mit Cookies `CONSENT`/`SOCS`, liest `data-n-a-sg`/`data-n-a-ts` und fragt `.../DotsSplashUi/data/batchexecute` (`Fbv4je`/`garturlreq`). Fallback: Paket `googlenewsdecoder`. **Inoffizielle Schnittstelle** – kann jederzeit brechen. Symptom im Log: „Google-Link nicht auflösbar“ / „Google-Seite ohne Signatur“ → Rubriken mit `nur_mit_text = true` werden dann leer bzw. zeigen nur Überschriften.
 
-### 4.2 Bezahlschranken (`volltext`)
-Manche Lokalzeitungen liefern hinter der Paywall Platzhaltertext („Lorem ipsum … consetetur sadipscing …“). Alles ab dem ersten Platzhalter-Absatz wird verworfen; bleiben < 60 Wörter, gilt der Artikel als „kein Text“, sonst wird „(Rest hinter Bezahlschranke)“ angehängt. Log: „Bezahlschranke erkannt“.
+### 4.2 Bezahlschranken (`volltext` → `Paywall`)
+Luka will Paywall-Artikel **gar nicht** sehen, auch nicht den frei lesbaren Anfang. `volltext()` wirft `Paywall`, wenn
+- das Seiten-HTML `"isAccessibleForFree": false` (schema.org) enthält, oder
+- der extrahierte Text eine typische Formulierung enthält (`PAYWALL_TEXT`: „um alles zu lesen“, „jetzt weiterlesen mit“, „exklusiv für Abonnenten“, „Lorem ipsum“-Platzhalter, „subscribe to continue“ …).
+Der Artikel wird dann übersprungen und der nächste rückt nach. Log: „Bezahlschranke, übersprungen“. Neue Formulierungen bei Bedarf in `PAYWALL_TEXT` ergänzen.
 
 ### 4.3 Zeichenkodierung
 `trafilatura.extract()` bekommt **Bytes** (`r.content`), nicht `r.text`. Sonst kommen bei Seiten ohne Charset-Header (z. B. heise) kaputte Umlaute („Ã¼“).
@@ -73,6 +78,18 @@ Manche Lokalzeitungen liefern hinter der Paywall Platzhaltertext („Lorem ipsum
 Quelle: wöchentliche Übersicht „Flohmärkte, Märkte und Feste in Hessen“ der hessenschau, gefunden über `https://www.hessenschau.de/freizeit/index.rss` (Link enthält `flohmaerkte`). Parser zerlegt Text in Orts-Überschriften und Einträge, zwei Formate werden erkannt: „Datum“-Zeile + „- Text“-Zeile, oder „Datum - Text“ in einer Zeile. Ortsabgleich über `ort_treffer` („Rüsselsheim am Main“ passt zu „Rüsselsheim“, „Langenselbold“ nicht zu „Langen“). Abschnitt „Märkte und Feste“ nur mit `mit_maerkten = true`. Übersicht deckt immer nur bis zum kommenden Sonntag ab. Entwickelt mit einer nachgebauten Seite; das Problem beim ersten echten Lauf war laut Luka ein Eingabefehler seinerseits, kein Fehler im Parser. Ändert die hessenschau ihr Seitenformat, zuerst den echten Seitentext ansehen.
 
 Die Google-Rubrik „Flohmarkt-News“ liefert oft 0 Treffer (Google hält `when:14d` bei komplexen Suchen nicht ein, Treffer sind meist alt). Das ist erwartetes Verhalten; leere Rubriken entfallen automatisch.
+
+### 4.4b Verlauf: jeder Bericht nur einmal (`Verlauf`)
+Datei `verlauf_datei` (`/opt/morgenzeitung/verlauf.json`, nicht im Repo) speichert pro gezeigtem Bericht Datum, Titel-Schlüssel, URL(s) und die Themen-Wörter. Einträge älter als `verlauf_tage` (21) fallen raus. Gemerkt wird **erst nach erfolgreichem Versand** (`--nosend` merkt nichts, außer mit `--merken`). Ein Bericht, der schon einmal verschickt wurde, erscheint nie wieder; findet eine Rubrik nichts Neues, entfällt sie. Die Flohmarkt-Wochenübersicht erscheint dadurch einmal pro Woche. Verlauf zurücksetzen: Datei löschen.
+
+### 4.4c Themen-Duplikate (`themen_woerter`, `gleiches_thema`)
+Ohne KI, über Wortvergleich: bedeutungstragende Wörter (Stoppwörter raus, grob gestemmt, Abkürzungen wie GDL/RTX und Zahlen zählen mit). Gleiches Thema, wenn
+- Titel-Überlappung ≥ 0,6, oder ≥ 0,5 bei mindestens 4 Wörtern, oder ein 2-Wort-Titel komplett im anderen steckt, oder
+- die ersten ~80 Wörter des Artikels Jaccard ≥ 0,3 haben (bzw. ≥ 0,18 bei Titel-Überlappung ≥ 0,4).
+Verglichen wird mit allen Berichten dieser Ausgabe (rubrikübergreifend) und mit dem Verlauf. Wörter aus dem Rubriknamen und `themen_ignorieren` zählen nicht. Beispiele und Grenzfälle stehen in `tests/test_funktionen.py` – bei Fehlalarmen oder durchrutschenden Doppelungen dort einen Fall ergänzen und Schwellen anpassen. Bekannte Grenze: sehr kurze Titel ohne Artikeltext („Xbox Game Pass im Dezember“) werden nicht immer als gleich erkannt.
+
+### 4.4d Lesbarkeit der Artikel
+`html_saeubern()` entfernt vor dem Extrahieren `figure`, `figcaption`, `picture`, `img`, `video`, `aside` und Elemente mit Klassen wie caption/credit/copyright/bildunterschrift. Danach: Bildnachweis-Zeilen („Foto: …“, „©“) raus, Absätze, die einem früheren zu ≥ 60 % gleichen, raus. trafilatura liefert Markdown → Zwischenüberschriften werden `<h4>`, Aufzählungen `<ul>`. Erster Absatz als fetter Vorspann (`.lead`), in der Kopfzeile „ca. X Min.“ Lesezeit (ab 150 Wörtern).
 
 ### 4.5 Hacks & Entdeckungen
 Hacker News (`hnrss.org/newest?q=…&points=30`), HN-Startseite, Hackaday – lokal gefiltert über `stichwoerter`. Mehrdeutige Begriffe („Echo“, „Ring“, „Nest“, „Matter“, „Hue“) bewusst nur in eindeutiger Form. Reddit-RSS wurde von Reddit am 13.11.2026 eingestellt – nicht verwenden.
@@ -104,16 +121,18 @@ Mit dem Repo kann der Ablauf künftig auch `git pull` im LXC sein statt ZIP – 
 
 ## 6. Testen ohne Lukas Server
 
-`tests/mock_lauf.py` baut eine Ausgabe mit nachgebauten Feeds, HA-Antworten und Artikeln (kein Netz nötig) und schreibt nach `tests/out/`. Nützlich nach jeder Änderung:
+Zwei Offline-Tests (kein Netz nötig):
 ```bash
-pip install feedparser requests trafilatura googlenewsdecoder
-python3 tests/mock_lauf.py
+pip install feedparser requests trafilatura googlenewsdecoder lxml
+python3 tests/test_funktionen.py   # Bildunterschriften, Absatz-Doppelungen, Bezahlschranken, Themenvergleich
+python3 tests/mock_lauf.py         # zwei Tage Probelauf, prüft den Verlauf; EPUBs in tests/out/
 ```
 Prüft nur Struktur und Layout; echte Feeds/Google/hessenschau verhalten sich anders. Vorschau einer Seite: EPUB entpacken und `OEBPS/titel.xhtml` im Browser öffnen (headless Chrome-Screenshot bei 600×1000 ähnelt dem Kindle).
 
 ## 7. Offene Punkte und Ideen
 
 - [ ] Über einige Wochen beobachten, ob die Flohmarkt-Rubrik mit der echten hessenschau-Seite zuverlässig Treffer liefert.
+- [ ] Themen-Duplikate und Paywall-Erkennung im echten Betrieb beobachten (Log: „aussortiert: …“ pro Rubrik); Schwellen/Formulierungen bei Bedarf nachschärfen.
 - [ ] Deployment per `git pull` statt ZIP (Deploy-Key im LXC, `update.sh` liest dann aus dem Checkout).
 - [ ] Lauf-Überwachung: bei Fehler im Timer-Lauf Push über Home Assistant (z. B. `OnFailure=` im Service → Webhook an HA).
 - [ ] Optional KI-Auswahl/Zusammenfassung (wie im Video): lokal über Ollama auf Lukas Desktop (RTX 3070 Ti, muss laufen) oder per API. Bisher bewusst ohne KI.
