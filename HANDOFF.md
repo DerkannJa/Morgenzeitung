@@ -107,7 +107,7 @@ CSS in `CSS` im Skript: linksb체ndig statt Blocksatz (Luka fand Blocksatz unsch�
 **Ein Push auf `main` reicht.** Der Service hat `ExecStartPre=-/usr/local/bin/zeitung-holen`: vor jedem Lauf (05:30) `git fetch` + `reset --hard origin/main`, `pip install -r requirements.txt`, dann Pr체fung (`py_compile` des Skripts + `tomllib` der `config.toml`). Ist der neue Stand kaputt, wird auf den vorherigen Commit zur체ckgesetzt. Ist GitHub nicht erreichbar, l채uft der bisherige Stand.
 
 - Sofort aktualisieren + Probelauf ohne Versand (im LXC): `zeitung-update`
-- Vom Proxmox-Host aus: `pct exec 105 -- zeitung-update`
+- Vom Proxmox-Host aus: `pct exec 105 -- /usr/local/bin/zeitung-update`
 - Senden: `pct exec 105 -- systemctl start morgenzeitung.service`, Log: `journalctl -u morgenzeitung -n 30 --no-pager`
 - Neuinstallation/Reparatur (idempotent, 체bernimmt Zugangsdaten aus alter `config.toml`):
   `pct exec 105 -- bash -c "apt-get update -qq && apt-get install -y -qq curl && curl -fsSL https://raw.githubusercontent.com/DerkannJa/Morgenzeitung/main/install.sh | bash"`
