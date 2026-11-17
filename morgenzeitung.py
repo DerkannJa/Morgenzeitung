@@ -224,166 +224,132 @@ def anime_html(cfg):
 
 
 # ---------------------------------------------------------------- Game Pass: schnelle 100 %
-TA = "https://www.trueachievements.com"
-STUNDEN_RE = re.compile(r"complete all\s+([\d,]+)\s+(.+?)\s+achievements is\s+(\d+)\s*(?:-|–|to)\s*(\d+)\s*hours?", re.I | re.S)
-STUNDEN_RE2 = re.compile(r"takes around\s+(\d+)\s*(?:-|–|to)\s*(\d+)\s*hours? to unlock all", re.I)
+# Liste der Abgänge aus frei lesbaren Newsseiten (TrueAchievements sperrt Server per Bot-Schutz),
+# Spielzeit "Completionist" (100 % Spielinhalt) von HowLongToBeat.
 ABGANG_TITEL = re.compile(r"game pass.*\b(loses|leaving|leave|losing)\b|\b(loses|leaving|losing)\b.*game pass", re.I)
-
-
-def ta_slug(name):
-    """TA-Adresse aus dem Spielnamen raten: 'Aliens: Dark Descent' -> 'Aliens-Dark-Descent'."""
-    name = name.replace("&", "and").replace("'", "").replace("’", "")
-    return re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-")
+MONAT = r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+GESPERRT = ("trueachievements.com",)
 
 
 def abgang_spiele(md):
-    """Spiele aus den Listen unter 'leaving'-Überschriften des Artikels (Markdown mit Links).
-    Gibt [(name, slug, datum_text)] zurück."""
+    """Spiele aus den Listen unter 'leaving'-Überschriften eines Artikels (Markdown).
+    Gibt [(name, datum_text)] zurück."""
     spiele, aktiv, datum, irgendwo = [], False, "", []
     for zeile in md.splitlines():
         z = zeile.strip()
-        if z.startswith("#"):
-            aktiv = bool(re.search(r"leav|los(e|ing)|remov", z, re.I))
-            m = re.search(r"on\s+([A-Z][a-z]+\s+\d{1,2})", z)
+        if z.startswith("#") or (z.startswith("**") and z.endswith("**") and len(z) < 120):
+            aktiv = bool(re.search(r"leav|los(e|ing)|remov|exit|depart", z, re.I))
+            m = re.search(rf"({MONAT}\s+\d{{1,2}})", z)
             datum = m.group(1) if m else ""
             continue
         m = re.match(r"[-*•]\s+(.*)", z)
         if not m:
             continue
-        eintrag = m.group(1)
-        link = re.search(r"\[([^\]]+)\]\((?:https?://www\.trueachievements\.com)?/game/([^/)\s?#]+)", eintrag)
-        if link:
-            name, slug = link.group(1), link.group(2)
-        else:
-            name = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", eintrag)
-            name = re.split(r"\s+[—–-]\s+|\s*\(", name)[0].strip(" *_")
-            slug = ta_slug(name)
-        if not name or len(name) > 80:
+        name = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", m.group(1))   # Links -> Text
+        name = name.replace("**", "").replace("__", "")
+        d = re.search(rf"({MONAT}\s+\d{{1,2}})", name)
+        name = re.sub(rf"^{MONAT}\s+\d{{1,2}}(st|nd|rd|th)?\s*[:–—-]\s*", "", name)
+        name = re.split(r"\s+[—–-]\s+|\s*\(|\s*\|", name)[0].strip(" *_:")
+        name = name.replace("™", "").replace("®", "").strip()
+        if not name or len(name) > 70 or len(name.split()) > 10:
             continue
-        (spiele if aktiv else irgendwo).append((name.strip(" *_"), slug, datum))
-    if not spiele:
+        (spiele if aktiv else irgendwo).append((name, datum or (d.group(1) if d else "")))
+    if not spiele and len(irgendwo) >= 2:
         spiele = irgendwo
-    eindeutig, slugs = [], set()
-    for s_ in spiele:
-        if s_[1].lower() not in slugs:
-            slugs.add(s_[1].lower())
-            eindeutig.append(s_)
+    eindeutig, namen = [], set()
+    for sp in spiele:
+        k = re.sub(r"[^a-z0-9]", "", sp[0].lower())
+        if k and k not in namen:
+            namen.add(k)
+            eindeutig.append(sp)
     return eindeutig[:25]
 
 
-def json_text(t):
+def hltb_stunden(name):
+    """(Stunden für 100 %, Name bei HowLongToBeat) oder None."""
     try:
-        return html.unescape(re.sub(r"<[^>]+>", " ", json.loads('"' + t + '"')))
-    except ValueError:
-        return t
-
-
-def spiele_aus_links(seite, text):
-    """Fallback: /game/<Slug>-Links der Seite, deren Linktext im Artikeltext (ab 'leaving') vorkommt."""
-    norm = lambda t: re.sub(r"[^a-z0-9]+", " ", t.lower()).strip()
-    m = re.search(r"leav|loses|losing|remov", text, re.I)
-    koerper = " " + norm(text[m.start():] if m else text) + " "
-    datum = re.search(r"\bon\s+([A-Z][a-z]+\s+\d{1,2})\b", text)
-    datum = datum.group(1) if datum else ""
-    spiele, slugs = [], set()
-    for slug, inhalt in re.findall(r'<a[^>]+href="(?:https?://www\.trueachievements\.com)?/game/([A-Za-z0-9][A-Za-z0-9\-]*)(?:/[^"]*)?"[^>]*>(.*?)</a>',
-                                   seite, re.S | re.I):
-        name = html.unescape(re.sub(r"<[^>]+>", " ", inhalt)).strip()
-        name = re.sub(r"\s+", " ", name)
-        if not name or len(name) > 80 or slug.lower() in slugs:
-            continue
-        if f" {norm(name)} " in koerper:
-            slugs.add(slug.lower())
-            spiele.append((name, slug, datum))
-    return spiele[:25]
-
-
-def ta_stunden(slug):
-    """(von, bis, offizieller Name) laut TA-Schätzung für alle Erfolge, oder None."""
-    for pfad, muster in ((f"/game/{slug}/completiontime", STUNDEN_RE), (f"/game/{slug}/achievements", STUNDEN_RE2)):
+        from howlongtobeatpy import HowLongToBeat
+    except ImportError:
+        log.warning("howlongtobeatpy fehlt – pip install howlongtobeatpy")
+        return None
+    versuche = [name]
+    if ":" in name:
+        versuche += [name.split(":", 1)[1].strip(), name.split(":", 1)[0].strip()]
+    versuche.append(re.sub(r"\s*\((Windows|PC|Xbox[^)]*|Console)\)", "", name))
+    for v in dict.fromkeys(versuche):
         try:
-            r = requests.get(TA + pfad, headers={"User-Agent": UA}, timeout=20)
-            if r.status_code != 200:
-                continue
-            text = re.sub(r"<[^>]+>", " ", r.text)
-            text = html.unescape(re.sub(r"\s+", " ", text + " " + r.text))  # Meta-Beschreibung mitprüfen
-            m = muster.search(text)
-            if m:
-                if muster is STUNDEN_RE:
-                    return int(m.group(3)), int(m.group(4)), m.group(2).strip()
-                return int(m.group(1)), int(m.group(2)), None
-            if re.search(r"less than (an|one) hour|0\s*-\s*1 hours?", text, re.I):
-                return 0, 1, None
+            res = HowLongToBeat(0.5).search(v, similarity_case_sensitive=False)
         except Exception as e:
-            log.info("TA-Zeit für %s nicht lesbar: %s", slug, e)
+            log.info("HowLongToBeat nicht erreichbar (%s): %s", v, e)
+            return None
+        if res:
+            best = max(res, key=lambda e: e.similarity)
+            if best.completionist:
+                return float(best.completionist), best.game_name
     return None
 
 
 def gamepass_html(cfg, verlauf):
-    """Wenn TA einen Artikel über Game-Pass-Abgänge bringt: Spiele mit kurzer 100-%-Zeit auflisten."""
+    """Bei einer Meldung über Game-Pass-Abgänge: Spiele mit kurzer 100-%-Zeit auflisten."""
     max_h = cfg.get("max_stunden", 10)
-    gefunden = []
+    gefunden, titel_gesehen = [], set()
     for url in cfg.get("feeds", []):
         for _, e, _ in feed_laden(url, dt.datetime.now(TZ) - dt.timedelta(hours=cfg.get("max_alter_stunden", 72))):
             titel = html.unescape(e.get("title", ""))
-            titel = re.sub(r"\s+-\s+TrueAchievements$", "", titel)
-            if ABGANG_TITEL.search(titel):
+            if ABGANG_TITEL.search(titel) and titel not in titel_gesehen:
+                titel_gesehen.add(titel)
                 gefunden.append((titel, e.get("link", "")))
-    out = []
-    for titel, link in gefunden[:2]:
+    out, versucht = [], 0
+    for titel, link in gefunden:
+        if versucht >= cfg.get("max_artikel", 6):
+            break
         key = "gamepass:" + titel.lower()
         if verlauf.schon_gezeigt(key, None):
             continue
         echt = echter_link(link)
-        if not echt:
+        if not echt or any(g in echt for g in GESPERRT):
             continue
+        versucht += 1
         try:
-            roh = requests.get(echt, headers={"User-Agent": UA}, timeout=20).content
-            md = trafilatura.extract(roh, url=echt, output_format="markdown", include_links=True,
-                                     include_tables=False, include_images=False) or ""
-            seite = roh.decode("utf-8", "ignore")
-            # Artikeltext zusätzlich aus JSON-LD (articleBody), falls die Seite ihn nur dort hat
-            text = md + " " + " ".join(json_text(t) for t in
-                                       re.findall(r'"articleBody"\s*:\s*"((?:[^"\\]|\\.)*)"', seite))
+            r = requests.get(echt, headers={"User-Agent": UA}, timeout=20)
+            r.raise_for_status()
+            md = trafilatura.extract(r.content, url=echt, output_format="markdown", include_formatting=True,
+                                     include_links=False, include_tables=True, include_images=False) or ""
         except Exception as ex:
-            log.info("Game-Pass-Artikel nicht lesbar: %s", ex)
+            log.info("Game-Pass-Artikel nicht lesbar (%s): %s", echt, ex)
             continue
-        alle = abgang_spiele(md) or spiele_aus_links(seite, text)
-        log.info("Game Pass: %d Spiele im Artikel gefunden: %s", len(alle), ", ".join(a[0] for a in alle))
-        if not alle:
-            log.info("Game Pass Diagnose: Seite %d Zeichen, Text %d Zeichen, %d /game/-Links, articleBody %s, "
-                     "Listenzeilen %d, Textanfang: %r", len(seite), len(md), seite.count("/game/"),
-                     "ja" if '"articleBody"' in seite else "nein",
-                     sum(1 for z in md.splitlines() if z.lstrip().startswith(("-", "*"))), text[:300])
-        spiele = [sp for sp in alle if not verlauf.schon_gezeigt("gamepass-spiel:" + sp[1].lower(), None)]
+        alle = abgang_spiele(md)
+        log.info("Game Pass: %d Spiele in '%s' (%s): %s", len(alle), titel, echt.split("/")[2],
+                 ", ".join(a[0] for a in alle))
+        if len(alle) < 2:
+            continue
+        verlauf.merken(key, echt, {"titel": set(), "anfang": set()})
+        spiele = [sp for sp in alle if not verlauf.schon_gezeigt("gamepass-spiel:" + sp[0].lower(), None)]
         if not spiele:
-            log.info("Game Pass: keine neuen Spiele in '%s'", titel)
             continue
         kurz, lang, unbekannt = [], 0, []
-        for name, slug, datum in spiele:
-            h = ta_stunden(slug)
+        for name, datum in spiele:
+            verlauf.merken("gamepass-spiel:" + name.lower(), None, {"titel": set(), "anfang": set()})
+            h = hltb_stunden(name)
             if not h:
                 unbekannt.append(name)
-            elif h[1] <= max_h:
-                kurz.append((h[1], h[0], h[2] or name, datum))
+            elif h[0] <= max_h:
+                kurz.append((h[0], name, datum))
             else:
                 lang += 1
-        log.info("Game Pass: '%s' – %d Spiele, %d bis %d Std., %d ohne Schätzung",
-                 titel, len(spiele), len(kurz), max_h, len(unbekannt))
-        verlauf.merken(key, echt, {"titel": set(), "anfang": set()})
-        for sp in spiele:
-            verlauf.merken("gamepass-spiel:" + sp[1].lower(), None, {"titel": set(), "anfang": set()})
+        log.info("Game Pass: %d neue Spiele, %d bis %d Std., %d länger, %d ohne Zeit",
+                 len(spiele), len(kurz), max_h, lang, len(unbekannt))
         zeilen = [f"<p class='zeile'><i>{esc(titel)}</i></p>"]
-        for bis, von, name, datum in sorted(kurz):
-            zeilen.append(f"<p class='zeile'><b>{von}–{bis} Std.</b> {esc(name)}"
+        for std, name, datum in sorted(kurz):
+            zeilen.append(f"<p class='zeile'><b>ca. {std:g} Std.</b> {esc(name)}"
                           f"{' <i>(bis ' + esc(datum) + ')</i>' if datum else ''}</p>")
         if not kurz:
-            zeilen.append(f"<p class='zeile'>Kein Spiel unter {max_h} Std. für 100 %.</p>")
+            zeilen.append(f"<p class='zeile'>Kein Spiel mit 100 % in höchstens {max_h} Std.</p>")
         rest = []
         if lang:
             rest.append(f"{lang} länger")
         if unbekannt:
-            rest.append("ohne Schätzung: " + ", ".join(unbekannt))
+            rest.append("ohne Zeitangabe: " + ", ".join(unbekannt))
         if rest:
             zeilen.append(f"<p class='zeile'><i>Außerdem: {esc('; '.join(rest))}</i></p>")
         out.append("".join(zeilen))
