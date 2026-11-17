@@ -38,7 +38,7 @@ titel = "romaji"                   # "romaji" (z. B. Sousou no Frieren) oder "en
 # ein Kasten mit den Spielen, deren 100 % laut HowLongToBeat ("Completionist") höchstens
 # max_stunden dauern. TrueAchievements selbst sperrt Server aus und wird übersprungen.
 feeds = ["https://news.google.com/rss/search?q=%22Game+Pass%22+(leaving+OR+loses)+when:3d&hl=en-US&gl=US&ceid=US:en"]
-max_stunden = 10
+max_stunden = 12
 max_alter_stunden = 72
 max_artikel = 6
 

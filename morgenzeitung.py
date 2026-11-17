@@ -298,7 +298,7 @@ def hltb_stunden(name):
 
 def gamepass_html(cfg, verlauf):
     """Bei einer Meldung über Game-Pass-Abgänge: Spiele mit kurzer 100-%-Zeit auflisten."""
-    max_h = cfg.get("max_stunden", 10)
+    max_h = cfg.get("max_stunden", 12)
     gefunden, titel_gesehen = [], set()
     for url in cfg.get("feeds", []):
         for _, e, _ in feed_laden(url, dt.datetime.now(TZ) - dt.timedelta(hours=cfg.get("max_alter_stunden", 72))):
@@ -1012,7 +1012,7 @@ def zeitung_bauen(cfg):
         try:
             gp = gamepass_html(cfg["gamepass"], verlauf)
             if gp:
-                kasten(f"Game Pass: schnelle 100 % (bis {cfg['gamepass'].get('max_stunden', 10)} Std.)", gp)
+                kasten(f"Game Pass: schnelle 100 % (bis {cfg['gamepass'].get('max_stunden', 12)} Std.)", gp)
         except Exception as e:
             log.warning("Game-Pass-Kasten nicht verfügbar: %s", e)
     kapitel, uebersicht, gesehen, ausgabe = [], [], set(), []
