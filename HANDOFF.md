@@ -22,7 +22,9 @@ Inhalt einer Ausgabe:
 | Home Assistant | `http://192.168.178.173:8123`, langlebiger Token „Morgenzeitung“ |
 | Sicherheitsupdates | `unattended-upgrades` im LXC aktiv |
 
-Secrets (Gmail-Adresse, App-Passwort, HA-Token) stehen **nur** in `/opt/morgenzeitung/config.toml` im LXC (chmod 600). Im Repo stehen Platzhalter. Nie echte Werte committen.
+Secrets (Gmail-Adresse, App-Passwort, HA-Token, AniList-Name) stehen **nur** in `/opt/morgenzeitung/geheim.toml` im LXC (chmod 600). Das Skript legt diese Datei beim Laden über `config.toml` (`config_laden()`/`zusammenfuehren()`). Im Repo stehen Platzhalter. Nie echte Werte committen.
+
+Layout im LXC: `/opt/morgenzeitung/app` = Git-Checkout von `main` (öffentliches Repo, kein Key nötig), daneben `geheim.toml`, `venv/`, `ausgaben/`, `verlauf.json`, `alt/` (Dateien aus der ZIP-Zeit).
 
 ### Home-Assistant-Entitäten, die genutzt werden
 - `weather.forecast_home` – Wetter + `weather.get_forecasts` (daily)
@@ -100,24 +102,19 @@ AniList-GraphQL-API (`graphql.anilist.co`, ohne Schlüssel). Liest Lukas Liste �
 ### 4.6 Layout (Kindle 11. Gen, 6")
 CSS in `CSS` im Skript: linksbündig statt Blocksatz (Luka fand Blocksatz unschön), Zeitungskopf mit Linien, Titelseiten-„Kästen“ mit Spalten (`.zeile b { min-width: 5em }`), Rubriken mit Balken, Artikel mit Trennlinien. Titel 1.45em, damit „Lukas Morgenzeitung“ in eine Zeile passt. Keine Bilder (Graustufen-Gerät).
 
-## 5. Update einspielen (bewährter Ablauf)
+## 5. Updates (automatisch seit 17.11.2026)
 
-Luka arbeitet unter Windows (PowerShell) und in der Proxmox-Shell. Befehle **jeweils in eigenem Codeblock**, alle auf einmal (nicht in einem großen Block, nicht einzeln mit Warten). Nach `pct enter 105` erst weiterkopieren, wenn `root@morgenzeitung` erscheint.
+**Ein Push auf `main` reicht.** Der Service hat `ExecStartPre=-/usr/local/bin/zeitung-holen`: vor jedem Lauf (05:30) `git fetch` + `reset --hard origin/main`, `pip install -r requirements.txt`, dann Prüfung (`py_compile` des Skripts + `tomllib` der `config.toml`). Ist der neue Stand kaputt, wird auf den vorherigen Commit zurückgesetzt. Ist GitHub nicht erreichbar, läuft der bisherige Stand.
 
-1. PC (PowerShell), nimmt automatisch die neueste ZIP aus Downloads:
-   ```powershell
-   $zip = Get-ChildItem "$env:USERPROFILE\Downloads\morgenzeitung*.zip" | Sort-Object LastWriteTime | Select-Object -Last 1; $zip.Name; scp $zip.FullName root@192.168.178.103:/root/morgenzeitung.zip
-   ```
-2. Proxmox-Host: `pct push 105 /root/morgenzeitung.zip /root/morgenzeitung.zip`
-3. `pct enter 105`
-4. `cd /root && rm -rf morgenzeitung && unzip -o morgenzeitung.zip && bash morgenzeitung/update.sh`
-   `update.sh` sichert `config.toml` als `.bak`, kopiert neues Skript und neue `config.toml` und **übernimmt Gmail-Adresse, App-Passwort und HA-Token automatisch** aus der alten Konfiguration.
-5. Test: `/opt/morgenzeitung/venv/bin/python /opt/morgenzeitung/morgenzeitung.py --nosend 2>&1 | grep "Rubrik"`
-6. Senden: `systemctl start morgenzeitung.service && journalctl -u morgenzeitung -n 15 --no-pager`
+- Sofort aktualisieren + Probelauf ohne Versand (im LXC): `zeitung-update`
+- Vom Proxmox-Host aus: `pct exec 105 -- zeitung-update`
+- Senden: `pct exec 105 -- systemctl start morgenzeitung.service`, Log: `journalctl -u morgenzeitung -n 30 --no-pager`
+- Neuinstallation/Reparatur (idempotent, übernimmt Zugangsdaten aus alter `config.toml`):
+  `pct exec 105 -- bash -c "apt-get update -qq && apt-get install -y -qq curl && curl -fsSL https://raw.githubusercontent.com/DerkannJa/Morgenzeitung/main/install.sh | bash"`
 
-Achtung: `update.sh` ersetzt die komplette `config.toml` durch die Repo-Version (nur die drei Secrets bleiben). Änderungen, die Luka direkt im LXC gemacht hat, gehen dabei verloren → vorher ins Repo übernehmen. Stand 15.11.: Repo-`config.toml` enthält alle bisher im LXC gemachten Änderungen (Volltext für Rechenzentrum/Smart Home/Gaming/Releases/TA/Rocket League, Flohmärkte, Hacks & Entdeckungen).
+Folge: `config.toml` im Repo ist die einzige Konfiguration. Änderungen direkt im LXC an `app/config.toml` werden beim nächsten Lauf überschrieben → immer im Repo ändern. Nur `geheim.toml` ist lokal.
 
-Mit dem Repo kann der Ablauf künftig auch `git pull` im LXC sein statt ZIP – noch nicht eingerichtet (siehe 7).
+Luka-Präferenz für Shell-Anleitungen: alle Befehle auf einmal, jeder in eigenem Codeblock.
 
 ## 6. Testen ohne Lukas Server
 
@@ -133,7 +130,7 @@ Prüft nur Struktur und Layout; echte Feeds/Google/hessenschau verhalten sich an
 
 - [ ] Über einige Wochen beobachten, ob die Flohmarkt-Rubrik mit der echten hessenschau-Seite zuverlässig Treffer liefert.
 - [ ] Themen-Duplikate und Paywall-Erkennung im echten Betrieb beobachten (Log: „aussortiert: …“ pro Rubrik); Schwellen/Formulierungen bei Bedarf nachschärfen.
-- [ ] Deployment per `git pull` statt ZIP (Deploy-Key im LXC, `update.sh` liest dann aus dem Checkout).
+- [x] Deployment per Git statt ZIP (17.11.2026, siehe 5).
 - [ ] Lauf-Überwachung: bei Fehler im Timer-Lauf Push über Home Assistant (z. B. `OnFailure=` im Service → Webhook an HA).
 - [ ] Optional KI-Auswahl/Zusammenfassung (wie im Video): lokal über Ollama auf Lukas Desktop (RTX 3070 Ti, muss laufen) oder per API. Bisher bewusst ohne KI.
 - [ ] Optional: Mails (Gmail) als Rubrik „Wichtiges aus dem Postfach“.

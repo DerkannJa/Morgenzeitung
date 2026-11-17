@@ -920,15 +920,42 @@ def senden(cfg, pfad):
     log.info("An %s gesendet", m["kindle_adresse"])
 
 
+def zusammenfuehren(basis, oben):
+    """Werte aus 'oben' (geheim.toml) über 'basis' (config.toml) legen, Tabellen rekursiv."""
+    for k, v in oben.items():
+        if isinstance(v, dict) and isinstance(basis.get(k), dict):
+            zusammenfuehren(basis[k], v)
+        else:
+            basis[k] = v
+    return basis
+
+
+def config_laden(config_pfad, geheim_pfad=None):
+    with open(config_pfad, "rb") as f:
+        cfg = tomllib.load(f)
+    if geheim_pfad:
+        kandidaten = [Path(geheim_pfad)]
+    else:
+        hier = Path(__file__).resolve().parent
+        kandidaten = [hier / "geheim.toml", hier.parent / "geheim.toml"]
+    for k in kandidaten:
+        if k.is_file():
+            with open(k, "rb") as f:
+                zusammenfuehren(cfg, tomllib.load(f))
+            log.info("Zugangsdaten aus %s geladen", k)
+            break
+    return cfg
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=str(Path(__file__).with_name("config.toml")))
     ap.add_argument("--nosend", action="store_true")
+    ap.add_argument("--geheim", help="Datei mit Passwörtern/Token (Standard: geheim.toml neben oder über dem Skript)")
     ap.add_argument("--merken", action="store_true", help="mit --nosend: Berichte trotzdem als gelesen merken")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    with open(args.config, "rb") as f:
-        cfg = tomllib.load(f)
+    cfg = config_laden(Path(args.config), args.geheim)
     pfad, verlauf = zeitung_bauen(cfg)
     if not args.nosend:
         senden(cfg, pfad)

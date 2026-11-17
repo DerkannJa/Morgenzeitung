@@ -1,5 +1,6 @@
 # Morgenzeitung – Konfiguration
-# Nach Änderungen einfach neu testen:  /opt/morgenzeitung/venv/bin/python /opt/morgenzeitung/morgenzeitung.py --nosend
+# Wird vor jedem Lauf automatisch von GitHub geholt – Änderungen im Repo machen, nicht im LXC.
+# Zugangsdaten stehen getrennt in /opt/morgenzeitung/geheim.toml. Sofort testen: zeitung-update
 
 [zeitung]
 titel = "Lukas Morgenzeitung"

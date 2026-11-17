@@ -28,27 +28,25 @@ pct start 104
 ```
 ID 104 und Storage `local-lvm` ggf. an dein System anpassen.
 
-## 3. Dateien übertragen und installieren
+## 3. Installieren
 
-Den Ordner `morgenzeitung` (morgenzeitung.py, config.toml, install.sh) auf den Proxmox-Host kopieren, z. B. nach `/root/morgenzeitung`, dann:
-
-```bash
-for f in morgenzeitung.py config.toml install.sh; do pct push 104 /root/morgenzeitung/$f /root/$f; done
-pct enter 104
-bash /root/install.sh
-```
-
-## 4. Konfiguration ausfüllen
+Auf dem Proxmox-Host (ID anpassen):
 
 ```bash
-nano /opt/morgenzeitung/config.toml
+pct exec 104 -- bash -c "apt-get update -qq && apt-get install -y -qq curl && curl -fsSL https://raw.githubusercontent.com/DerkannJa/Morgenzeitung/main/install.sh | bash"
 ```
-Eintragen: `absender` (Gmail-Adresse), `app_passwort`, `token` (HA).
+
+## 4. Zugangsdaten eintragen
+
+```bash
+pct exec 104 -- nano /opt/morgenzeitung/geheim.toml
+```
+Eintragen: `absender` (Gmail-Adresse), `app_passwort`, `token` (HA). Alles andere steht in `config.toml` im Repo und wird vor jedem Lauf automatisch von GitHub aktualisiert.
 
 ## 5. Testen
 
 ```bash
-/opt/morgenzeitung/venv/bin/python /opt/morgenzeitung/morgenzeitung.py --nosend   # nur bauen
+zeitung-update                                                                      # aktualisieren + nur bauen
 systemctl start morgenzeitung.service                                               # bauen + senden
 journalctl -u morgenzeitung -n 40                                                   # Log ansehen
 systemctl list-timers | grep morgenzeitung                                          # nächster Lauf
