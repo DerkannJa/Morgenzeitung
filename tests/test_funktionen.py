@@ -1,6 +1,7 @@
 """Offline-Tests für Volltext-Aufbereitung, Bezahlschranken und Themen-Duplikate.
 Aufruf: python3 tests/test_funktionen.py   (kein Netz nötig)"""
 import pathlib
+import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -139,6 +140,12 @@ pruefe(m.ta_stunden("Moving-Out-2") == (15, 20, "Moving Out 2"), "TA-Stunden aus
 pruefe(m.ta_stunden("Gabby") == (1, 2, None), "TA-Stunden aus achievements")
 pruefe(m.ta_stunden("Gibtsnicht") is None, "TA-Stunden fehlen")
 m.requests.get = alt_get
+
+seite = ('<nav><a href="/game/Halo-Infinite">Halo Infinite</a></nav><script>{"articleBody":"Games leaving Xbox Game Pass '
+         'on November 30 Aliens: Dark Descent Star Trucker"}</script><a href="/game/Aliens-Dark-Descent"><b>Aliens: Dark Descent</b></a>'
+         '<a href="/game/Star-Trucker/achievements">Star Trucker</a>')
+txt = " ".join(m.json_text(t) for t in re.findall(r'"articleBody"\s*:\s*"((?:[^"\\]|\\.)*)"', seite))
+pruefe([x[1] for x in m.spiele_aus_links(seite, txt)] == ["Aliens-Dark-Descent", "Star-Trucker"], "Game-Pass-Fallback über Links")
 
 print()
 print("Alles in Ordnung." if not FEHLER else f"{len(FEHLER)} Fehler.")

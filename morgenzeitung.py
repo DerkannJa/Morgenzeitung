@@ -271,6 +271,33 @@ def abgang_spiele(md):
     return eindeutig[:25]
 
 
+def json_text(t):
+    try:
+        return html.unescape(re.sub(r"<[^>]+>", " ", json.loads('"' + t + '"')))
+    except ValueError:
+        return t
+
+
+def spiele_aus_links(seite, text):
+    """Fallback: /game/<Slug>-Links der Seite, deren Linktext im Artikeltext (ab 'leaving') vorkommt."""
+    norm = lambda t: re.sub(r"[^a-z0-9]+", " ", t.lower()).strip()
+    m = re.search(r"leav|loses|losing|remov", text, re.I)
+    koerper = " " + norm(text[m.start():] if m else text) + " "
+    datum = re.search(r"\bon\s+([A-Z][a-z]+\s+\d{1,2})\b", text)
+    datum = datum.group(1) if datum else ""
+    spiele, slugs = [], set()
+    for slug, inhalt in re.findall(r'<a[^>]+href="(?:https?://www\.trueachievements\.com)?/game/([A-Za-z0-9][A-Za-z0-9\-]*)(?:/[^"]*)?"[^>]*>(.*?)</a>',
+                                   seite, re.S | re.I):
+        name = html.unescape(re.sub(r"<[^>]+>", " ", inhalt)).strip()
+        name = re.sub(r"\s+", " ", name)
+        if not name or len(name) > 80 or slug.lower() in slugs:
+            continue
+        if f" {norm(name)} " in koerper:
+            slugs.add(slug.lower())
+            spiele.append((name, slug, datum))
+    return spiele[:25]
+
+
 def ta_stunden(slug):
     """(von, bis, offizieller Name) laut TA-Schätzung für alle Erfolge, oder None."""
     for pfad, muster in ((f"/game/{slug}/completiontime", STUNDEN_RE), (f"/game/{slug}/achievements", STUNDEN_RE2)):
@@ -314,10 +341,21 @@ def gamepass_html(cfg, verlauf):
             roh = requests.get(echt, headers={"User-Agent": UA}, timeout=20).content
             md = trafilatura.extract(roh, url=echt, output_format="markdown", include_links=True,
                                      include_tables=False, include_images=False) or ""
+            seite = roh.decode("utf-8", "ignore")
+            # Artikeltext zusätzlich aus JSON-LD (articleBody), falls die Seite ihn nur dort hat
+            text = md + " " + " ".join(json_text(t) for t in
+                                       re.findall(r'"articleBody"\s*:\s*"((?:[^"\\]|\\.)*)"', seite))
         except Exception as ex:
             log.info("Game-Pass-Artikel nicht lesbar: %s", ex)
             continue
-        spiele = [sp for sp in abgang_spiele(md) if not verlauf.schon_gezeigt("gamepass-spiel:" + sp[1].lower(), None)]
+        alle = abgang_spiele(md) or spiele_aus_links(seite, text)
+        log.info("Game Pass: %d Spiele im Artikel gefunden: %s", len(alle), ", ".join(a[0] for a in alle))
+        if not alle:
+            log.info("Game Pass Diagnose: Seite %d Zeichen, Text %d Zeichen, %d /game/-Links, articleBody %s, "
+                     "Listenzeilen %d, Textanfang: %r", len(seite), len(md), seite.count("/game/"),
+                     "ja" if '"articleBody"' in seite else "nein",
+                     sum(1 for z in md.splitlines() if z.lstrip().startswith(("-", "*"))), text[:300])
+        spiele = [sp for sp in alle if not verlauf.schon_gezeigt("gamepass-spiel:" + sp[1].lower(), None)]
         if not spiele:
             log.info("Game Pass: keine neuen Spiele in '%s'", titel)
             continue
