@@ -9,13 +9,15 @@ APP=$ZIEL/app
 REPO=https://github.com/DerkannJa/Morgenzeitung.git
 
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq git python3 python3-venv tzdata ca-certificates >/dev/null
+if [ -z "${SCHNELL:-}" ]; then
+    apt-get update -qq
+    apt-get install -y -qq git python3 python3-venv tzdata ca-certificates >/dev/null
+fi
 timedatectl set-timezone Europe/Berlin 2>/dev/null || ln -sf /usr/share/zoneinfo/Europe/Berlin /etc/localtime
 
 mkdir -p "$ZIEL/ausgaben"
 if [ -d "$APP/.git" ]; then
-    git -C "$APP" fetch -q origin main && git -C "$APP" reset -q --hard origin/main
+    [ -n "${SCHNELL:-}" ] || { git -C "$APP" fetch -q origin main && git -C "$APP" reset -q --hard origin/main; }
 else
     git clone -q --branch main "$REPO" "$APP"
 fi
@@ -56,40 +58,60 @@ if [ -f "$ZIEL/morgenzeitung.py" ] || [ -f "$ZIEL/config.toml" ]; then
 fi
 
 [ -x "$ZIEL/venv/bin/python" ] || python3 -m venv "$ZIEL/venv"
-"$ZIEL/venv/bin/pip" install -q --upgrade pip
+[ -n "${SCHNELL:-}" ] || "$ZIEL/venv/bin/pip" install -q --upgrade pip
 "$ZIEL/venv/bin/pip" install -q -r "$APP/requirements.txt"
 
-# Holt vor jedem Lauf den neuesten Stand von GitHub. Ist der neue Stand kaputt, bleibt der alte.
-cat > /usr/local/bin/zeitung-holen <<EOF
+# Dateien atomar schreiben (neue Datei + mv), damit ein laufendes Skript nicht mitten im Lesen geändert wird
+schreibe() { local ziel=$1 modus=$2; cat > "$ziel.neu"; chmod "$modus" "$ziel.neu"; mv -f "$ziel.neu" "$ziel"; }
+
+# zeitung-holen: neuesten Stand von GitHub holen. Kaputter Stand -> zurück auf den alten + Meldung an HA.
+# Mit --test: nach einem Update Probelauf ohne Versand, Ergebnis als Push über Home Assistant.
+schreibe /usr/local/bin/zeitung-holen 755 <<SKRIPT
 #!/bin/bash
 APP=$APP
 VENV=$ZIEL/venv
+exec 9>/run/morgenzeitung.lock
+flock -w 1800 9 || { echo "Anderer Lauf blockiert"; exit 0; }
+PY="\$VENV/bin/python \$APP/morgenzeitung.py"
 alt=\$(git -C "\$APP" rev-parse HEAD)
 git -C "\$APP" fetch -q origin main || { echo "GitHub nicht erreichbar – nutze bisherigen Stand"; exit 0; }
-git -C "\$APP" reset -q --hard origin/main
-neu=\$(git -C "\$APP" rev-parse HEAD)
-[ "\$alt" = "\$neu" ] && { echo "Schon aktuell (\${neu:0:7})"; exit 0; }
+neu=\$(git -C "\$APP" rev-parse origin/main)
+[ "\$alt" = "\$neu" ] && { echo "Schon aktuell (\${alt:0:7})"; exit 0; }
+# Schon als kaputt erkannten Stand nicht alle 15 Minuten erneut versuchen und melden
+[ "\$neu" = "\$(cat $ZIEL/kaputt 2>/dev/null)" ] && { echo "Stand \${neu:0:7} ist fehlerhaft – bleibe auf \${alt:0:7}"; exit 0; }
+git -C "\$APP" reset -q --hard "\$neu"
+aenderungen=\$(git -C "\$APP" log --format='- %s' "\$alt..\$neu")
 "\$VENV/bin/pip" install -q -r "\$APP/requirements.txt"
-if "\$VENV/bin/python" -c "import sys, tomllib, py_compile; py_compile.compile(sys.argv[1], doraise=True); tomllib.load(open(sys.argv[2], 'rb'))" "\$APP/morgenzeitung.py" "\$APP/config.toml"; then
-    echo "Aktualisiert: \${alt:0:7} -> \${neu:0:7}"
-    git -C "\$APP" log --oneline "\$alt..\$neu"
-else
+if ! "\$VENV/bin/python" -c "import sys, tomllib, py_compile; py_compile.compile(sys.argv[1], doraise=True); tomllib.load(open(sys.argv[2], 'rb'))" "\$APP/morgenzeitung.py" "\$APP/config.toml"; then
     echo "Neuer Stand fehlerhaft – zurück auf \${alt:0:7}"
     git -C "\$APP" reset -q --hard "\$alt"
+    echo "\$neu" > $ZIEL/kaputt
+    \$PY --nur-melden fehler "Morgenzeitung: Update fehlerhaft" "Stand \${neu:0:7} lässt sich nicht laden, es läuft weiter \${alt:0:7}.
+\$aenderungen"
+    exit 0
 fi
-EOF
-chmod 755 /usr/local/bin/zeitung-holen
+echo "Aktualisiert: \${alt:0:7} -> \${neu:0:7}"
+echo "\$aenderungen"
+# Dienste/Timer/Skripte neu einrichten, falls sich das Installationsskript geändert hat
+if ! git -C "\$APP" diff --quiet "\$alt" "\$neu" -- install.sh; then
+    echo "install.sh geändert – richte Dienste neu ein"
+    SCHNELL=1 bash "\$APP/install.sh" >/dev/null
+fi
+if [ "\${1:-}" = "--test" ]; then
+    \$PY --test --notiz "Neu (\${neu:0:7}):
+\$aenderungen" || true
+fi
+SKRIPT
 
-# Sofort aktualisieren und Probelauf ohne Versand
-cat > /usr/local/bin/zeitung-update <<EOF
+# Sofort aktualisieren und Probelauf ohne Versand (zeigt Ergebnis im Terminal)
+schreibe /usr/local/bin/zeitung-update 755 <<SKRIPT
 #!/bin/bash
 /usr/local/bin/zeitung-holen
 echo "Probelauf ohne Versand ..."
-$ZIEL/venv/bin/python $APP/morgenzeitung.py --nosend 2>&1 | grep -E "Rubrik|ERROR|Traceback|EPUB erstellt"
-EOF
-chmod 755 /usr/local/bin/zeitung-update
+$ZIEL/venv/bin/python $APP/morgenzeitung.py --nosend 2>&1 | grep -E "Rubrik|Game Pass|ERROR|Traceback|EPUB erstellt"
+SKRIPT
 
-cat > /etc/systemd/system/morgenzeitung.service <<EOF
+schreibe /etc/systemd/system/morgenzeitung.service 644 <<SKRIPT
 [Unit]
 Description=Morgenzeitung bauen und an Kindle senden
 Wants=network-online.target
@@ -98,11 +120,11 @@ After=network-online.target
 [Service]
 Type=oneshot
 ExecStartPre=-/usr/local/bin/zeitung-holen
-ExecStart=$ZIEL/venv/bin/python $APP/morgenzeitung.py
+ExecStart=/usr/bin/flock -w 1800 /run/morgenzeitung.lock $ZIEL/venv/bin/python $APP/morgenzeitung.py
 WorkingDirectory=$ZIEL
-EOF
+SKRIPT
 
-cat > /etc/systemd/system/morgenzeitung.timer <<EOF
+schreibe /etc/systemd/system/morgenzeitung.timer 644 <<SKRIPT
 [Unit]
 Description=Morgenzeitung jeden Morgen um 05:30
 
@@ -112,11 +134,37 @@ Persistent=true
 
 [Install]
 WantedBy=timers.target
-EOF
+SKRIPT
+
+# Alle 15 Minuten nach Updates schauen; bei neuem Stand Probelauf + Meldung an HA
+schreibe /etc/systemd/system/morgenzeitung-pruefen.service 644 <<SKRIPT
+[Unit]
+Description=Morgenzeitung: Updates holen und testen
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/zeitung-holen --test
+WorkingDirectory=$ZIEL
+SKRIPT
+
+schreibe /etc/systemd/system/morgenzeitung-pruefen.timer 644 <<SKRIPT
+[Unit]
+Description=Morgenzeitung: alle 15 Minuten nach Updates schauen
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=timers.target
+SKRIPT
 
 systemctl daemon-reload
-systemctl enable -q --now morgenzeitung.timer
+systemctl enable -q --now morgenzeitung.timer morgenzeitung-pruefen.timer
 echo
 echo "Fertig. Stand: $(git -C "$APP" log --oneline -1)"
 echo "Ab jetzt holt sich die Zeitung jeden Morgen vor dem Bauen selbst den neuesten Stand."
+echo "Neue Stände werden alle 15 Minuten geholt, getestet und per Home Assistant gemeldet."
 echo "Sofort aktualisieren + Probelauf:  zeitung-update"

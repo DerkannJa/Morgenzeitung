@@ -107,7 +107,12 @@ CSS in `CSS` im Skript: linksbündig statt Blocksatz (Luka fand Blocksatz unsch�
 
 ## 5. Updates (automatisch seit 17.11.2026)
 
-**Ein Push auf `main` reicht.** Der Service hat `ExecStartPre=-/usr/local/bin/zeitung-holen`: vor jedem Lauf (05:30) `git fetch` + `reset --hard origin/main`, `pip install -r requirements.txt`, dann Prüfung (`py_compile` des Skripts + `tomllib` der `config.toml`). Ist der neue Stand kaputt, wird auf den vorherigen Commit zurückgesetzt. Ist GitHub nicht erreichbar, läuft der bisherige Stand.
+**Ein Push auf `main` reicht – Luka muss nichts tun.**
+- `morgenzeitung-pruefen.timer` (alle 15 Min.) → `zeitung-holen --test`: bei neuem Commit `reset --hard origin/main`, `pip install -r requirements.txt`, Prüfung (`py_compile` + `tomllib`). Ok → Probelauf ohne Versand (`--test`), Ergebnis (neue Commits, Rubrik-Zeilen, Warnungen) als Push. Kaputt → zurück auf alten Commit, Commit in `/opt/morgenzeitung/kaputt` gemerkt (keine Wiederholungsmeldungen), Push „Update fehlerhaft“.
+- Hat sich `install.sh` geändert, richtet `zeitung-holen` Dienste/Timer/Skripte selbst neu ein (`SCHNELL=1 bash install.sh`, Dateien atomar per mv). Neue Infrastruktur also auch einfach pushen.
+- 05:30-Lauf: `ExecStartPre=-zeitung-holen`, Lauf unter `flock /run/morgenzeitung.lock`. Fehler im Lauf → Push „Morgenzeitung nicht verschickt“.
+- Meldungen: Skript feuert HA-Event `morgenzeitung_status` (`art` fehler/test, `titel`, `text`) über REST; HA-Automation `automation.morgenzeitung_status_aufs_handy` → `notify.send_message` an `notify.nothingphone`.
+- Luka will maximal automatisiert arbeiten: Handarbeit nur als letzter Fallback.
 
 - Sofort aktualisieren + Probelauf ohne Versand (im LXC): `zeitung-update`
 - Vom Proxmox-Host aus: `pct exec 105 -- /usr/local/bin/zeitung-update`
@@ -134,7 +139,7 @@ Prüft nur Struktur und Layout; echte Feeds/Google/hessenschau verhalten sich an
 - [ ] Über einige Wochen beobachten, ob die Flohmarkt-Rubrik mit der echten hessenschau-Seite zuverlässig Treffer liefert.
 - [ ] Themen-Duplikate und Paywall-Erkennung im echten Betrieb beobachten (Log: „aussortiert: …“ pro Rubrik); Schwellen/Formulierungen bei Bedarf nachschärfen.
 - [x] Deployment per Git statt ZIP (17.11.2026, siehe 5).
-- [ ] Lauf-Überwachung: bei Fehler im Timer-Lauf Push über Home Assistant (z. B. `OnFailure=` im Service → Webhook an HA).
+- [x] Lauf-Überwachung und automatischer Probelauf mit Push über HA (17.11.2026, siehe 5).
 - [ ] Optional KI-Auswahl/Zusammenfassung (wie im Video): lokal über Ollama auf Lukas Desktop (RTX 3070 Ti, muss laufen) oder per API. Bisher bewusst ohne KI.
 - [ ] Optional: Mails (Gmail) als Rubrik „Wichtiges aus dem Postfach“.
 - [ ] E-Ink-Displays (Garderobe: Kalender/Wetter) sind ein **separates** Projekt; Hardware: 2× Seeed TRMNL 7.5" (OG) DIY Kit über ESPHome. Black-Friday-Preiswächter läuft als geplante Aufgabe bis 02.12.2026.

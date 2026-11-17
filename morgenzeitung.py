@@ -1096,21 +1096,71 @@ def config_laden(config_pfad, geheim_pfad=None):
     return cfg
 
 
+class Mitschrift(logging.Handler):
+    """Sammelt Rubrik-Zeilen und Warnungen für die Meldung an Home Assistant."""
+
+    def __init__(self):
+        super().__init__(logging.INFO)
+        self.rubriken, self.warnungen = [], []
+
+    def emit(self, rec):
+        msg = rec.getMessage()
+        if rec.levelno >= logging.WARNING:
+            self.warnungen.append(msg[:160])
+        elif msg.startswith(("Rubrik ", "Game Pass: ", "Anime: ")) and "Diagnose" not in msg:
+            self.rubriken.append(msg[:160])
+
+
+def ha_melden(cfg, art, titel, text):
+    """Event 'morgenzeitung_status' an Home Assistant; eine HA-Automation macht daraus die Push-Nachricht."""
+    hacfg = cfg.get("homeassistant") or {}
+    if "LANGLEBIG" in hacfg.get("token", "LANGLEBIG"):
+        log.warning("HA-Meldung nicht möglich (kein Token): %s", titel)
+        return
+    try:
+        HA(hacfg).post("/api/events/morgenzeitung_status", {"art": art, "titel": titel, "text": text[:1500]})
+    except Exception as e:
+        log.warning("HA-Meldung fehlgeschlagen: %s", e)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=str(Path(__file__).with_name("config.toml")))
     ap.add_argument("--nosend", action="store_true")
     ap.add_argument("--geheim", help="Datei mit Passwörtern/Token (Standard: geheim.toml neben oder über dem Skript)")
     ap.add_argument("--merken", action="store_true", help="mit --nosend: Berichte trotzdem als gelesen merken")
+    ap.add_argument("--test", action="store_true", help="Probelauf ohne Versand, Ergebnis als Meldung an HA")
+    ap.add_argument("--notiz", default="", help="Zusatztext für die Test-Meldung (z. B. neue Änderungen)")
+    ap.add_argument("--nur-melden", nargs=3, metavar=("ART", "TITEL", "TEXT"), help="nur eine Meldung an HA schicken")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    mit = Mitschrift()
+    logging.getLogger().addHandler(mit)
     cfg = config_laden(Path(args.config), args.geheim)
-    pfad, verlauf = zeitung_bauen(cfg)
-    if not args.nosend:
-        senden(cfg, pfad)
-        verlauf.speichern()  # erst nach erfolgreichem Versand merken
-    elif args.merken:
-        verlauf.speichern()
+    if args.nur_melden:
+        ha_melden(cfg, *args.nur_melden)
+        return 0
+    try:
+        pfad, verlauf = zeitung_bauen(cfg)
+        if args.test:
+            teile = [args.notiz.strip()] if args.notiz.strip() else []
+            teile += mit.rubriken
+            if mit.warnungen:
+                teile.append("Warnungen: " + " | ".join(mit.warnungen[:5]))
+            teile.append(f"EPUB {pfad.stat().st_size // 1024} KB, Versand morgen 05:30.")
+            ha_melden(cfg, "test", "Morgenzeitung aktualisiert – Probelauf ok", "\n".join(teile))
+        elif not args.nosend:
+            senden(cfg, pfad)
+            verlauf.speichern()  # erst nach erfolgreichem Versand merken
+        elif args.merken:
+            verlauf.speichern()
+    except Exception as e:
+        log.exception("Lauf fehlgeschlagen")
+        if not args.nosend:
+            titel = "Morgenzeitung: Probelauf fehlgeschlagen" if args.test else "Morgenzeitung nicht verschickt"
+            ha_melden(cfg, "fehler", titel, f"{type(e).__name__}: {e}\nLog: journalctl -u morgenzeitung -n 50")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
