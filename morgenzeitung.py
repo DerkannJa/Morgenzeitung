@@ -258,7 +258,7 @@ def abgang_spiele(md):
         spiele = irgendwo
     eindeutig, namen = [], set()
     for sp in spiele:
-        k = re.sub(r"[^a-z0-9]", "", sp[0].lower())
+        k = spiel_key(sp[0])
         if k and k not in namen:
             namen.add(k)
             eindeutig.append(sp)
@@ -296,23 +296,54 @@ def hltb_stunden(name):
     return None
 
 
-def gamepass_html(cfg, verlauf):
-    """Bei einer Meldung über Game-Pass-Abgänge: Spiele mit kurzer 100-%-Zeit auflisten."""
+MONATE_EN = {m: i for i, m in enumerate(["January", "February", "March", "April", "May", "June", "July", "August",
+                                           "September", "October", "November", "December"], 1)}
+
+
+def spiel_key(name):
+    """Vergleichsschlüssel für Spielnamen: 'Gabby’s' und 'Gabby's', Groß/klein, Sonderzeichen egal."""
+    return re.sub(r"[^a-z0-9]", "", name.lower().replace("’", "").replace("'", ""))
+
+
+def abgangsdatum(text, heute):
+    """'November 30' -> date (dieses oder nächstes Jahr), sonst None."""
+    m = re.match(rf"({MONAT})\s+(\d{{1,2}})", text or "")
+    if not m:
+        return None
+    monat, tag = MONATE_EN[m.group(1)], int(m.group(2))
+    jahr = heute.year + (1 if monat < heute.month - 6 else 0)
+    try:
+        return dt.date(jahr, monat, tag)
+    except ValueError:
+        return None
+
+
+def gamepass_html(cfg, z):
+    """Spiele, die den Game Pass verlassen und deren 100 % höchstens max_stunden dauern.
+    Bleiben bis zum Abgangsdatum auf der Titelseite (Stand in gamepass_datei)."""
     max_h = cfg.get("max_stunden", 12)
+    heute = dt.datetime.now(TZ).date()
+    pfad = Path(cfg.get("datei") or Path(z.get("verlauf_datei", "verlauf.json")).with_name("gamepass.json"))
+    try:
+        stand = json.loads(pfad.read_text(encoding="utf-8")) if pfad.exists() else {}
+    except Exception as e:
+        log.warning("Game-Pass-Stand nicht lesbar, starte leer: %s", e)
+        stand = {}
+    artikel = {k: v for k, v in stand.get("artikel", {}).items() if v >= (heute - dt.timedelta(days=30)).isoformat()}
+    spiele = {k: v for k, v in stand.get("spiele", {}).items() if v["bis"] >= heute.isoformat()}
+    geaendert = len(artikel) != len(stand.get("artikel", {})) or len(spiele) != len(stand.get("spiele", {}))
+
     gefunden, titel_gesehen = [], set()
     for url in cfg.get("feeds", []):
         for _, e, _ in feed_laden(url, dt.datetime.now(TZ) - dt.timedelta(hours=cfg.get("max_alter_stunden", 72))):
             titel = html.unescape(e.get("title", ""))
-            if ABGANG_TITEL.search(titel) and titel not in titel_gesehen:
+            if ABGANG_TITEL.search(titel) and titel not in titel_gesehen and titel.lower() not in artikel:
                 titel_gesehen.add(titel)
                 gefunden.append((titel, e.get("link", "")))
-    out, versucht = [], 0
+    versucht = 0
     for titel, link in gefunden:
         if versucht >= cfg.get("max_artikel", 6):
             break
-        key = "gamepass:" + titel.lower()
-        if verlauf.schon_gezeigt(key, None):
-            continue
         echt = echter_link(link)
         if not echt or any(g in echt for g in GESPERRT):
             continue
@@ -330,38 +361,41 @@ def gamepass_html(cfg, verlauf):
                  ", ".join(a[0] for a in alle))
         if len(alle) < 2:
             continue
-        verlauf.merken(key, echt, {"titel": set(), "anfang": set()})
-        spiele = [sp for sp in alle if not verlauf.schon_gezeigt("gamepass-spiel:" + sp[0].lower(), None)]
-        if not spiele:
-            continue
-        kurz, lang, unbekannt = [], 0, []
-        for name, datum in spiele:
-            verlauf.merken("gamepass-spiel:" + name.lower(), None, {"titel": set(), "anfang": set()})
+        artikel[titel.lower()] = heute.isoformat()
+        geaendert = True
+        neu = [sp for sp in alle if spiel_key(sp[0]) not in stand.get("geprueft", {})]
+        geprueft = stand.setdefault("geprueft", {})
+        kurz = []
+        for name, datum in neu:
             h = hltb_stunden(name)
-            if not h:
-                unbekannt.append(name)
-            elif h[0] <= max_h:
-                kurz.append((h[0], name, datum))
-            else:
-                lang += 1
-        log.info("Game Pass: %d neue Spiele, %d bis %d Std. (%s), %d länger, %d ohne Zeit (%s)",
-                 len(spiele), len(kurz), max_h, ", ".join(f"{k[1]} {k[0]:g} h" for k in sorted(kurz)),
-                 lang, len(unbekannt), ", ".join(unbekannt))
-        zeilen = [f"<p class='zeile'><i>{esc(titel)}</i></p>"]
-        for std, name, datum in sorted(kurz):
-            zeilen.append(f"<p class='zeile'><b>ca. {round(std * 2) / 2:g} Std.</b> {esc(name)}"
-                          f"{' <i>(bis ' + esc(datum) + ')</i>' if datum else ''}</p>")
-        if not kurz:
-            zeilen.append(f"<p class='zeile'>Kein Spiel mit 100 % in höchstens {max_h} Std.</p>")
-        rest = []
-        if lang:
-            rest.append(f"{lang} länger")
-        if unbekannt:
-            rest.append("ohne Zeitangabe: " + ", ".join(unbekannt))
-        if rest:
-            zeilen.append(f"<p class='zeile'><i>Außerdem: {esc('; '.join(rest))}</i></p>")
-        out.append("".join(zeilen))
-    return "".join(out) or None
+            bis = abgangsdatum(datum, heute) or heute + dt.timedelta(days=14)
+            if h:  # ohne Zeitangabe morgen noch einmal versuchen
+                geprueft[spiel_key(name)] = bis.isoformat()
+            if h and h[0] <= max_h:
+                spiele[spiel_key(name)] = {"name": name, "stunden": h[0], "bis": bis.isoformat(),
+                                           "datum_bekannt": bool(abgangsdatum(datum, heute))}
+                kurz.append(name)
+        log.info("Game Pass: %d neu geprüft, %d bis %d Std.: %s", len(neu), len(kurz), max_h, ", ".join(kurz))
+
+    if geaendert or stand.get("geprueft"):
+        stand["geprueft"] = {k: v for k, v in stand.get("geprueft", {}).items() if v >= heute.isoformat()}
+        stand.update(artikel=artikel, spiele=spiele)
+        try:
+            pfad.parent.mkdir(parents=True, exist_ok=True)
+            tmp = pfad.with_suffix(".tmp")
+            tmp.write_text(json.dumps(stand, ensure_ascii=False, indent=1), encoding="utf-8")
+            tmp.replace(pfad)
+        except Exception as e:
+            log.warning("Game-Pass-Stand nicht speicherbar: %s", e)
+    if not spiele:
+        return None
+    zeilen = []
+    for sp in sorted(spiele.values(), key=lambda x: (x["bis"], x["stunden"])):
+        bis = dt.date.fromisoformat(sp["bis"])
+        wann = f"bis {bis:%d.%m.}" if sp.get("datum_bekannt", True) else "Abgang bald"
+        zeilen.append(f"<p class='zeile'><b>ca. {round(sp['stunden'] * 2) / 2:g} Std.</b> "
+                      f"{esc(sp['name'])} <i>({wann})</i></p>")
+    return "".join(zeilen)
 
 
 # ---------------------------------------------------------------- Nachrichten
@@ -1010,7 +1044,7 @@ def zeitung_bauen(cfg):
     verlauf = Verlauf(z.get("verlauf_datei"), z.get("verlauf_tage", 21))
     if cfg.get("gamepass"):
         try:
-            gp = gamepass_html(cfg["gamepass"], verlauf)
+            gp = gamepass_html(cfg["gamepass"], z)
             if gp:
                 kasten(f"Game Pass: schnelle 100 % (bis {cfg['gamepass'].get('max_stunden', 12)} Std.)", gp)
         except Exception as e:

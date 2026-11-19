@@ -2,6 +2,8 @@
 Aufruf: python3 tests/test_funktionen.py   (kein Netz nötig)"""
 import pathlib
 import re
+import json
+from pathlib import Path
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -127,6 +129,41 @@ sp2 = m.abgang_spiele(md2)
 pruefe([x[0] for x in sp2] == ["Star Trucker", "Generation Zero"] and sp2[0][1] == "November 30", f"Game-Pass-Liste 2: {sp2}")
 pruefe(bool(m.ABGANG_TITEL.search("Xbox Game Pass loses eight more games at the end of November")), "Titel erkannt")
 pruefe(not m.ABGANG_TITEL.search("Xbox Game Pass confirms second wave of new games for November"), "Zugangs-Titel ignoriert")
+
+pruefe(m.spiel_key("DreamWorks Gabby’s Dollhouse: Ready to Party") == m.spiel_key("Dreamworks Gabby's Dollhouse - Ready To Party"),
+       "Spielname-Vergleich (Apostroph/Groß/Satzzeichen)")
+import datetime as _dt
+pruefe(m.abgangsdatum("November 30", _dt.date(2026, 11, 19)) == _dt.date(2026, 11, 30), "Abgangsdatum dieses Jahr")
+pruefe(m.abgangsdatum("January 15", _dt.date(2026, 12, 20)) == _dt.date(2027, 1, 15), "Abgangsdatum nächstes Jahr")
+
+# Game-Pass-Kasten über zwei Tage: zwei Artikel mit demselben Spiel (andere Schreibweise), bleibt bis zum Abgang stehen
+import tempfile, types
+tmp = Path(tempfile.mkdtemp()) / "gp.json"
+artikel_md = {
+    "https://a.example/x": "## Games leaving Game Pass on November 30\n- DreamWorks Gabby’s Dollhouse: Ready to Party\n- Star Trucker\n",
+    "https://b.example/y": "## Leaving November 30\n- DreamWorks Gabby's Dollhouse: Ready to Party\n- Moving Out 2\n",
+}
+alt = (m.feed_laden, m.echter_link, m.requests.get, m.trafilatura.extract, m.hltb_stunden)
+fe = lambda t, l: (None, {"title": t, "link": l}, "")
+m.feed_laden = lambda url, grenze: [fe("Xbox Game Pass loses eight games", "https://a.example/x"),
+                                    fe("Eight games leaving Xbox Game Pass", "https://b.example/y")]
+m.echter_link = lambda u: u
+m.requests.get = lambda url, **k: types.SimpleNamespace(content=url, raise_for_status=lambda: None)
+m.trafilatura.extract = lambda inhalt, **k: artikel_md[inhalt]
+zeiten = {"Star Trucker": 34.0, "Moving Out 2": 23.4}
+aufrufe = []
+m.hltb_stunden = lambda n: aufrufe.append(n) or (zeiten.get(n, 2.71), n)
+html1 = m.gamepass_html({"feeds": ["f"], "max_stunden": 12, "datei": str(tmp)}, {})
+pruefe(html1.count("Gabby") == 1 and "bis 30.11." in html1 and "Star Trucker" not in html1, f"Kasten Tag 1: {html1}")
+pruefe(sum("Gabby" in a for a in aufrufe) == 1, "Gabby nur einmal bei HLTB nachgeschlagen")
+m.feed_laden = lambda url, grenze: []
+html2 = m.gamepass_html({"feeds": ["f"], "max_stunden": 12, "datei": str(tmp)}, {})
+pruefe(html2 == html1, "Kasten bleibt am Folgetag stehen")
+st = json.loads(tmp.read_text())
+st["spiele"][next(iter(st["spiele"]))]["bis"] = "2000-01-01"
+tmp.write_text(json.dumps(st))
+pruefe(m.gamepass_html({"feeds": ["f"], "max_stunden": 12, "datei": str(tmp)}, {}) is None, "Kasten verschwindet nach Abgang")
+m.feed_laden, m.echter_link, m.requests.get, m.trafilatura.extract, m.hltb_stunden = alt
 
 print()
 print("Alles in Ordnung." if not FEHLER else f"{len(FEHLER)} Fehler.")

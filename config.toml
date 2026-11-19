@@ -34,9 +34,10 @@ anilist_nutzer = "drkR4i"
 titel = "romaji"                   # "romaji" (z. B. Sousou no Frieren) oder "english"
 
 [gamepass]
-# Meldet eine Newsseite "Xbox Game Pass loses/leaving ...", erscheint auf der Titelseite einmalig
-# ein Kasten mit den Spielen, deren 100 % laut HowLongToBeat ("Completionist") höchstens
-# max_stunden dauern. TrueAchievements selbst sperrt Server aus und wird übersprungen.
+# Meldet eine Newsseite "Xbox Game Pass loses/leaving ...", stehen die Spiele, deren 100 % laut
+# HowLongToBeat ("Completionist") höchstens max_stunden dauern, bis zu ihrem Abgangsdatum auf der
+# Titelseite (eine Zeile je Spiel). TrueAchievements selbst sperrt Server aus und wird übersprungen.
+datei = "/opt/morgenzeitung/gamepass.json"   # merkt sich gefundene Spiele bis zum Abgang
 feeds = ["https://news.google.com/rss/search?q=%22Game+Pass%22+(leaving+OR+loses)+when:3d&hl=en-US&gl=US&ceid=US:en"]
 max_stunden = 12
 max_alter_stunden = 72
