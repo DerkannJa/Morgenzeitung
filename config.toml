@@ -38,9 +38,9 @@ titel = "romaji"                   # "romaji" (z. B. Sousou no Frieren) oder "en
 # HowLongToBeat ("Completionist") höchstens max_stunden dauern, bis zu ihrem Abgangsdatum auf der
 # Titelseite (eine Zeile je Spiel). TrueAchievements selbst sperrt Server aus und wird übersprungen.
 datei = "/opt/morgenzeitung/gamepass.json"   # merkt sich gefundene Spiele bis zum Abgang
-feeds = ["https://news.google.com/rss/search?q=%22Game+Pass%22+(leaving+OR+loses)+when:3d&hl=en-US&gl=US&ceid=US:en"]
+feeds = ["https://news.google.com/rss/search?q=%22Game+Pass%22+(leaving+OR+loses)+when:7d&hl=en-US&gl=US&ceid=US:en"]
 max_stunden = 12
-max_alter_stunden = 72
+max_alter_stunden = 168
 max_artikel = 6
 
 # ---------------------------------------------------------------
@@ -75,7 +75,7 @@ anzahl = 5
 volltext = true          # Artikeltext laden (Google-News-Links werden aufgelöst)
 nur_mit_text = true      # Meldungen ohne lesbaren Text überspringen (z. B. Bezahlschranke)
 max_woerter = 500
-max_alter_stunden = 72
+max_alter_stunden = 168
 # Ortsnamen stehen in fast jedem Lokaltitel und zählen beim Themenvergleich nicht
 themen_ignorieren = ["Mörfelden", "Walldorf", "Mörfelden-Walldorf", "Groß-Gerau", "Gerau", "Südhessen", "Hessen", "Darmstadt", "Frankfurt", "Rüsselsheim", "Langen", "Kelsterbach"]
 
@@ -123,7 +123,7 @@ anzahl = 3
 volltext = true
 nur_mit_text = true
 max_woerter = 400
-max_alter_stunden = 72
+max_alter_stunden = 168
 
 [[rubrik]]
 name = "Hacks & Entdeckungen"
@@ -178,11 +178,11 @@ max_alter_stunden = 168
 
 [[rubrik]]
 name = "Rocket League"
-feeds = ["https://news.google.com/rss/search?q=%22Rocket+League%22+-college+-collegiate+when:3d&hl=en-US&gl=US&ceid=US:en"]
+feeds = ["https://news.google.com/rss/search?q=%22Rocket+League%22+-college+-collegiate+when:7d&hl=en-US&gl=US&ceid=US:en"]
 anzahl = 3
 volltext = true
 nur_mit_text = true
 max_woerter = 400
-max_alter_stunden = 72
+max_alter_stunden = 168
 ausschluss = ["college", "collegiate", "CRL", "university", "universities", "NCAA", "NACE", "scholarship", "high school", "varsity", "campus"]
 
