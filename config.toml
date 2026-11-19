@@ -33,11 +33,13 @@ feiertage_tage = 7                 # Feiertage so viele Tage im Voraus anzeigen
 # die Uhrzeit auf Crunchyroll = Japan-Zeit + Versatz.
 anilist_nutzer = "drkR4i"
 titel = "romaji"                   # "romaji" (z. B. Sousou no Frieren) oder "english"
-stream_versatz_min = 0             # Standard-Versatz in Minuten für Serien ohne eigenen Eintrag
+stream_versatz_min = 0             # Standard für Serien ohne eigenen Eintrag (Minuten)
 
 [anime.stream_versatz]
-# Versatz in Minuten pro Serie, Schlüssel = Teil des Titels (wie in AniList, romaji)
-"Black Clover" = 120               # Japan 15:00 -> Crunchyroll 17:00
+# Pro Serie, Schlüssel = Teil des Titels (wie in AniList, romaji). Wert entweder
+#   feste Crunchyroll-Uhrzeit "HH:MM Zeitzone" (Zeitumstellungen werden automatisch gerechnet)
+#   oder Minuten nach der Japan-Ausstrahlung (Zahl)
+"Black Clover" = "08:00 America/Los_Angeles"   # Crunchyroll: samstags 8 Uhr Pacific
 
 [gamepass]
 # Meldet eine Newsseite "Xbox Game Pass loses/leaving ...", stehen die Spiele, deren 100 % laut

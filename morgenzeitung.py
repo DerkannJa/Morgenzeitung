@@ -211,19 +211,31 @@ def anime_html(cfg):
     standard = cfg.get("stream_versatz_min", 0)
     je_serie = {k.lower(): v for k, v in (cfg.get("stream_versatz") or {}).items()}
 
-    def versatz(mid):
-        name = titel.get(mid, "").lower()
-        return next((v for k, v in je_serie.items() if k in name), standard)
+    def stream_zeit(f):
+        """Japan-Ausstrahlung -> Stream-Zeit. Regel: Minuten (int) oder feste Uhrzeit
+        "HH:MM Zeitzone" (z. B. "08:00 America/Los_Angeles"); Zeitumstellungen rechnet zoneinfo."""
+        tv = dt.datetime.fromtimestamp(f["airingAt"], dt.timezone.utc)
+        name = titel.get(f["mediaId"], "").lower()
+        regel = next((v for k, v in je_serie.items() if k in name), standard)
+        if isinstance(regel, str):
+            uhr, zone = regel.split(None, 1)
+            h, mi = map(int, uhr.split(":"))
+            lokal = tv.astimezone(ZoneInfo(zone))
+            ziel = lokal.replace(hour=h, minute=mi, second=0)
+            if ziel < lokal:
+                ziel += dt.timedelta(days=1)
+            return ziel.astimezone(TZ)
+        return (tv + dt.timedelta(minutes=regel)).astimezone(TZ)
 
     jetzt = dt.datetime.now(TZ)
     start = jetzt.replace(hour=0, minute=0, second=0, microsecond=0)
     ende = start + dt.timedelta(days=1)
-    max_v = max([standard, *je_serie.values()]) * 60
+    max_v = 36 * 3600  # Stream kann bis zu ~1 Tag nach der Ausstrahlung kommen
     roh = anilist(ANILIST_TERMINE, {"ids": list(titel), "von": int(start.timestamp()) - 1 - max_v,
                                     "bis": int(ende.timestamp())})["Page"]["airingSchedules"]
     folgen = []
     for f in roh:
-        zeit = dt.datetime.fromtimestamp(f["airingAt"] + versatz(f["mediaId"]) * 60, TZ)
+        zeit = stream_zeit(f)
         if start <= zeit < ende:
             folgen.append((zeit, f))
     folgen.sort(key=lambda x: x[0])
