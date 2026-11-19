@@ -206,17 +206,32 @@ def anime_html(cfg):
     if not titel:
         log.info("Anime: keine Serien auf 'Watching'")
         return None
+    # Stream (z. B. Crunchyroll) kommt oft später als die TV-Ausstrahlung in Japan:
+    # Versatz in Minuten, pro Serie über einen Teil des Titels, sonst Standardwert.
+    standard = cfg.get("stream_versatz_min", 0)
+    je_serie = {k.lower(): v for k, v in (cfg.get("stream_versatz") or {}).items()}
+
+    def versatz(mid):
+        name = titel.get(mid, "").lower()
+        return next((v for k, v in je_serie.items() if k in name), standard)
+
     jetzt = dt.datetime.now(TZ)
     start = jetzt.replace(hour=0, minute=0, second=0, microsecond=0)
     ende = start + dt.timedelta(days=1)
-    folgen = anilist(ANILIST_TERMINE, {"ids": list(titel), "von": int(start.timestamp()) - 1,
-                                       "bis": int(ende.timestamp())})["Page"]["airingSchedules"]
+    max_v = max([standard, *je_serie.values()]) * 60
+    roh = anilist(ANILIST_TERMINE, {"ids": list(titel), "von": int(start.timestamp()) - 1 - max_v,
+                                    "bis": int(ende.timestamp())})["Page"]["airingSchedules"]
+    folgen = []
+    for f in roh:
+        zeit = dt.datetime.fromtimestamp(f["airingAt"] + versatz(f["mediaId"]) * 60, TZ)
+        if start <= zeit < ende:
+            folgen.append((zeit, f))
+    folgen.sort(key=lambda x: x[0])
     log.info("Anime: %d Serien, %d neue Folgen heute", len(titel), len(folgen))
     if not folgen:
         return None
     out = []
-    for f in folgen:
-        zeit = dt.datetime.fromtimestamp(f["airingAt"], TZ)
+    for zeit, f in folgen:
         wann = "schon da" if zeit <= jetzt else zeit.strftime("%H:%M")
         out.append(f"<p class='zeile'><b>{wann}</b> {esc(titel.get(f['mediaId'], '?'))} "
                    f"<i>(Folge {f['episode']})</i></p>")

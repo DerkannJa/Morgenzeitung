@@ -29,9 +29,15 @@ feiertage_tage = 7                 # Feiertage so viele Tage im Voraus anzeigen
 [anime]
 # AniList: alle Serien auf "Watching" (und "Rewatching"); an Tagen mit neuer Folge
 # erscheint auf der Titelseite der Kasten "Anime – neue Folgen heute".
-# Liste muss öffentlich sein. Uhrzeit = TV-Ausstrahlung in Japan, Stream oft kurz danach.
+# Liste muss öffentlich sein. AniList liefert die TV-Ausstrahlung in Japan; angezeigt wird
+# die Uhrzeit auf Crunchyroll = Japan-Zeit + Versatz.
 anilist_nutzer = "drkR4i"
 titel = "romaji"                   # "romaji" (z. B. Sousou no Frieren) oder "english"
+stream_versatz_min = 0             # Standard-Versatz in Minuten für Serien ohne eigenen Eintrag
+
+[anime.stream_versatz]
+# Versatz in Minuten pro Serie, Schlüssel = Teil des Titels (wie in AniList, romaji)
+"Black Clover" = 120               # Japan 15:00 -> Crunchyroll 17:00
 
 [gamepass]
 # Meldet eine Newsseite "Xbox Game Pass loses/leaving ...", stehen die Spiele, deren 100 % laut
