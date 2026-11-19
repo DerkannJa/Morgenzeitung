@@ -191,62 +191,86 @@ def anilist(query, variablen):
     return daten["data"]
 
 
+def name_norm(t):
+    return re.sub(r"[^a-z0-9]+", "", (t or "").lower())
+
+
+def stream_termine():
+    """Untertitel-Termine (Stream, meist Crunchyroll) der aktuellen Woche von animeschedule.net.
+    Ergebnis: {normalisierter Titel: [(Zeit, Folge)]}. Leer, wenn die Seite nicht lesbar ist."""
+    try:
+        r = requests.get("https://animeschedule.net/", headers={"User-Agent": UA}, timeout=30)
+        r.raise_for_status()
+        seite = r.text
+    except Exception as e:
+        log.warning("Anime: animeschedule.net nicht erreichbar (%s), nutze Japan-Zeiten", e)
+        return {}
+    termine = {}
+    teile = re.split(r'(?=<div data-show-id=)', seite)
+    for t in teile[1:]:
+        key = re.search(r'data-title-key="([^"]+)"', t)
+        zeit = re.search(r'<time datetime="([^"]+)"', t)
+        art = re.search(r'data-air-type="(\w+)"', t)
+        ep = re.search(r'class="show-episode">\s*Ep\s*(\d+)', t)
+        if not (key and zeit and art) or art.group(1) != "sub":
+            continue
+        try:
+            wann = dt.datetime.fromisoformat(zeit.group(1)).astimezone(TZ)
+        except ValueError:
+            continue
+        termine.setdefault(name_norm(html.unescape(key.group(1))), []).append(
+            (wann, int(ep.group(1)) if ep else None))
+    if not termine:
+        log.warning("Anime: keine Termine auf animeschedule.net erkannt (Seitenformat geändert?), nutze Japan-Zeiten")
+    return termine
+
+
 def anime_html(cfg):
-    """Neue Folgen von heute für alle Anime, die auf AniList als 'Watching' stehen. None wenn keine."""
+    """Neue Folgen von heute für alle Anime, die auf AniList als 'Watching' stehen. None wenn keine.
+    Uhrzeit = Stream-Start mit Untertiteln laut animeschedule.net; ohne Eintrag dort die
+    TV-Ausstrahlung in Japan (AniList), gekennzeichnet mit 'Japan-TV'."""
     nutzer = cfg.get("anilist_nutzer", "")
     if not nutzer or nutzer.startswith("DEIN"):
         return None
     liste = anilist(ANILIST_LISTE, {"name": nutzer})["MediaListCollection"]
-    titel = {}
+    titel, namen = {}, {}
     for l in (liste or {}).get("lists") or []:
         for e in l.get("entries") or []:
             t = e["media"]["title"]
-            titel[e["media"]["id"]] = (t.get("english") if cfg.get("titel") == "english" else None) \
+            mid = e["media"]["id"]
+            titel[mid] = (t.get("english") if cfg.get("titel") == "english" else None) \
                 or t.get("romaji") or t.get("english") or "?"
+            namen[mid] = {name_norm(x) for x in (t.get("romaji"), t.get("english")) if x}
     if not titel:
         log.info("Anime: keine Serien auf 'Watching'")
         return None
-    # Stream (z. B. Crunchyroll) kommt oft später als die TV-Ausstrahlung in Japan:
-    # Versatz in Minuten, pro Serie über einen Teil des Titels, sonst Standardwert.
-    standard = cfg.get("stream_versatz_min", 0)
-    je_serie = {k.lower(): v for k, v in (cfg.get("stream_versatz") or {}).items()}
-
-    def stream_zeit(f):
-        """Japan-Ausstrahlung -> Stream-Zeit. Regel: Minuten (int) oder feste Uhrzeit
-        "HH:MM Zeitzone" (z. B. "08:00 America/Los_Angeles"); Zeitumstellungen rechnet zoneinfo."""
-        tv = dt.datetime.fromtimestamp(f["airingAt"], dt.timezone.utc)
-        name = titel.get(f["mediaId"], "").lower()
-        regel = next((v for k, v in je_serie.items() if k in name), standard)
-        if isinstance(regel, str):
-            uhr, zone = regel.split(None, 1)
-            h, mi = map(int, uhr.split(":"))
-            lokal = tv.astimezone(ZoneInfo(zone))
-            ziel = lokal.replace(hour=h, minute=mi, second=0)
-            if ziel < lokal:
-                ziel += dt.timedelta(days=1)
-            return ziel.astimezone(TZ)
-        return (tv + dt.timedelta(minutes=regel)).astimezone(TZ)
-
     jetzt = dt.datetime.now(TZ)
     start = jetzt.replace(hour=0, minute=0, second=0, microsecond=0)
     ende = start + dt.timedelta(days=1)
-    max_v = 36 * 3600  # Stream kann bis zu ~1 Tag nach der Ausstrahlung kommen
-    roh = anilist(ANILIST_TERMINE, {"ids": list(titel), "von": int(start.timestamp()) - 1 - max_v,
-                                    "bis": int(ende.timestamp())})["Page"]["airingSchedules"]
-    folgen = []
-    for f in roh:
-        zeit = stream_zeit(f)
-        if start <= zeit < ende:
-            folgen.append((zeit, f))
-    folgen.sort(key=lambda x: x[0])
+    stream = stream_termine()
+
+    folgen = {}  # (mediaId, Folge) -> (Zeit, Japan-TV?)
+    for mid, ns in namen.items():
+        for n in ns:
+            for wann, ep in stream.get(n, []):
+                if start <= wann < ende:
+                    folgen[(mid, ep)] = (wann, False)
+    # Serien ohne Stream-Termin: TV-Ausstrahlung Japan von AniList
+    ohne = [mid for mid, ns in namen.items() if not any(n in stream for n in ns)]
+    if ohne:
+        roh = anilist(ANILIST_TERMINE, {"ids": ohne, "von": int(start.timestamp()) - 1,
+                                        "bis": int(ende.timestamp())})["Page"]["airingSchedules"]
+        for f in roh:
+            folgen[(f["mediaId"], f["episode"])] = (dt.datetime.fromtimestamp(f["airingAt"], TZ), True)
     log.info("Anime: %d Serien, %d neue Folgen heute", len(titel), len(folgen))
     if not folgen:
         return None
     out = []
-    for zeit, f in folgen:
+    for (mid, ep), (zeit, japan) in sorted(folgen.items(), key=lambda x: x[1][0]):
         wann = "schon da" if zeit <= jetzt else zeit.strftime("%H:%M")
-        out.append(f"<p class='zeile'><b>{wann}</b> {esc(titel.get(f['mediaId'], '?'))} "
-                   f"<i>(Folge {f['episode']})</i></p>")
+        folge = f"Folge {ep}" if ep else "neue Folge"
+        zusatz = ", Japan-TV" if japan else ""
+        out.append(f"<p class='zeile'><b>{wann}</b> {esc(titel[mid])} <i>({folge}{zusatz})</i></p>")
     return "".join(out)
 
 
