@@ -97,7 +97,7 @@ def post(url, headers=None, json=None, timeout=None):
             return R(js={"data": {"MediaListCollection": {"lists": [{"entries": [
                 {"media": {"id": 1, "title": {"romaji": "Sousou no Frieren", "english": "Frieren"}}},
                 {"media": {"id": 2, "title": {"romaji": "Kusuriya no Hitorigoto", "english": None}}}]}]}}})
-        t0 = json["variables"]["von"] + 1
+        t0 = json["variables"]["bis"] - 86400
         return R(js={"data": {"Page": {"airingSchedules": [{"airingAt": t0 + 3 * 3600, "episode": 7, "mediaId": 2},
                                                           {"airingAt": t0 + 17 * 3600 + 1800, "episode": 12, "mediaId": 1}]}}})
     fc = [{"datetime": (jetzt + dt.timedelta(days=d)).isoformat(), "condition": "rainy", "temperature": 9,
