@@ -351,7 +351,7 @@ def gamepass_html(cfg, z):
         try:
             r = requests.get(echt, headers={"User-Agent": UA}, timeout=20)
             r.raise_for_status()
-            md = trafilatura.extract(r.content, url=echt, output_format="markdown", include_formatting=True,
+            md = trafilatura.extract(seite_dekodieren(r), url=echt, output_format="markdown", include_formatting=True,
                                      include_links=False, include_tables=True, include_images=False) or ""
         except Exception as ex:
             log.info("Game-Pass-Artikel nicht lesbar (%s): %s", echt, ex)
@@ -601,10 +601,52 @@ class Paywall(Exception):
     pass
 
 
+MOJIBAKE = re.compile(r"Ã[¤¶¼„–œŸ©¨ ]|â€[™œ\x9d“”˜]|Â[ ·»«]")
+
+
+def seite_dekodieren(r):
+    """HTML einer Antwort als Text, Kodierung aus HTTP-Kopf, <meta charset> oder Probe (UTF-8 vor cp1252)."""
+    roh = r.content
+    kandidaten = []
+    ct = (r.headers.get("content-type") or "").lower()
+    m = re.search(r"charset=[\"']?([\w-]+)", ct)
+    if m:
+        kandidaten.append(m.group(1))
+    m = re.search(rb"<meta[^>]+charset=[\"']?([\w-]+)", roh[:20000], re.I)
+    if m:
+        kandidaten.append(m.group(1).decode("ascii", "ignore"))
+    kandidaten += ["utf-8", "cp1252"]
+    for k in kandidaten:
+        try:
+            text = roh.decode(k)
+            break
+        except (LookupError, UnicodeDecodeError):
+            continue
+    else:
+        text = roh.decode("utf-8", "replace")
+    return mojibake_reparieren(text)
+
+
+def mojibake_reparieren(text):
+    """Doppelt kodiertes UTF-8 ('fÃ¼r' statt 'für') zurückverwandeln, wenn es eindeutig danach aussieht."""
+    if len(MOJIBAKE.findall(text)) < 3:
+        return text
+    try:
+        besser = text.encode("cp1252", "strict").decode("utf-8", "strict")
+    except UnicodeError:
+        try:
+            besser = text.encode("latin-1", "strict").decode("utf-8", "strict")
+        except UnicodeError:
+            return text
+    return besser if len(MOJIBAKE.findall(besser)) < len(MOJIBAKE.findall(text)) else text
+
+
 def html_saeubern(roh):
     """Entfernt Abbildungen samt Bildunterschriften, bevor trafilatura den Text herauszieht."""
     try:
         from lxml import html as lhtml
+        if isinstance(roh, str):  # Kodierungsangabe stört lxml bei Text
+            roh = re.sub(r"^\s*<\?xml[^>]*>", "", roh)
         baum = lhtml.fromstring(roh)
         for el in baum.xpath("//figure|//figcaption|//picture|//img|//video|//aside"):
             el.drop_tree()
@@ -625,15 +667,15 @@ def volltext(url, max_woerter):
     try:
         r = requests.get(url, headers={"User-Agent": UA}, timeout=20)
         r.raise_for_status()
-        roh = r.content
+        roh = seite_dekodieren(r)
     except Exception as e:
         log.info("Volltext fehlgeschlagen (%s): %s", url, e)
         return None
-    kopf = roh[:400000].decode("utf-8", "ignore")
+    kopf = roh[:400000]
     if PAYWALL_HTML.search(kopf):
         raise Paywall(url)
     try:
-        # Bytes an trafilatura geben (Kodierung aus der Seite); Bildunterschriften vorher entfernen
+        # Text mit sicher erkannter Kodierung an trafilatura; Bildunterschriften vorher entfernen
         sauber = html_saeubern(roh)
         txt = trafilatura.extract(sauber, output_format="markdown", include_formatting=True,
                                   include_comments=False, include_tables=False, include_images=False,
@@ -643,6 +685,7 @@ def volltext(url, max_woerter):
         return None
     if not txt:
         return None
+    txt = mojibake_reparieren(txt)
     if PAYWALL_TEXT.search(txt):
         raise Paywall(url)
 

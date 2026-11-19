@@ -21,6 +21,7 @@ def pruefe(bedingung, text):
 class Antwort:
     def __init__(self, html):
         self.content = html.encode("utf-8")
+        self.headers = {}
         self.text = html
 
     def raise_for_status(self):
@@ -148,7 +149,7 @@ fe = lambda t, l: (None, {"title": t, "link": l}, "")
 m.feed_laden = lambda url, grenze: [fe("Xbox Game Pass loses eight games", "https://a.example/x"),
                                     fe("Eight games leaving Xbox Game Pass", "https://b.example/y")]
 m.echter_link = lambda u: u
-m.requests.get = lambda url, **k: types.SimpleNamespace(content=url, raise_for_status=lambda: None)
+m.requests.get = lambda url, **k: types.SimpleNamespace(content=url.encode(), headers={}, raise_for_status=lambda: None)
 m.trafilatura.extract = lambda inhalt, **k: artikel_md[inhalt]
 zeiten = {"Star Trucker": 34.0, "Moving Out 2": 23.4}
 aufrufe = []
@@ -164,6 +165,22 @@ st["spiele"][next(iter(st["spiele"]))]["bis"] = "2000-01-01"
 tmp.write_text(json.dumps(st))
 pruefe(m.gamepass_html({"feeds": ["f"], "max_stunden": 12, "datei": str(tmp)}, {}) is None, "Kasten verschwindet nach Abgang")
 m.feed_laden, m.echter_link, m.requests.get, m.trafilatura.extract, m.hltb_stunden = alt
+
+# 6) Umlaute: Kodierung nur im HTTP-Kopf, gar nicht angegeben, cp1252, doppelt kodiert
+satz = "Für die Bürger in Mörfelden ändert sich ab März Größeres – „so“ heißt es."
+html_seite = f"<html><head><title>x</title></head><body><article><p>{satz}</p></article></body></html>"
+faelle = {
+    "nur HTTP-Kopf": (html_seite.encode("utf-8"), {"content-type": "text/html; charset=utf-8"}),
+    "ohne Angabe": (html_seite.encode("utf-8"), {}),
+    "cp1252 mit meta": (html_seite.replace("<head>", "<head><meta charset='windows-1252'>").encode("cp1252"), {}),
+    "doppelt kodiert": (html_seite.encode("utf-8").decode("latin-1").encode("utf-8"), {}),
+}
+for name, (inhalt, kopf) in faelle.items():
+    text = m.seite_dekodieren(types.SimpleNamespace(content=inhalt, headers=kopf))
+    sauber = m.html_saeubern(text)
+    pruefe(satz in sauber, f"Umlaute korrekt ({name})")
+pruefe(m.mojibake_reparieren("Ein ganz normaler Text mit Ã als Zeichen") == "Ein ganz normaler Text mit Ã als Zeichen",
+       "Einzelnes Sonderzeichen bleibt unverändert")
 
 print()
 print("Alles in Ordnung." if not FEHLER else f"{len(FEHLER)} Fehler.")
