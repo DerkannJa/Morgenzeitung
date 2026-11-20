@@ -182,6 +182,12 @@ for name, (inhalt, kopf) in faelle.items():
 pruefe(m.mojibake_reparieren("Ein ganz normaler Text mit Ã als Zeichen") == "Ein ganz normaler Text mit Ã als Zeichen",
        "Einzelnes Sonderzeichen bleibt unverändert")
 
+# 7) Echter Sport vs. Sport-Videospiel
+pruefe(m.echter_sport("NFL Mexico als Highlight: fünf Pflichtspiele in Woche 11. Mit RedZone als Teil eines NFL Game Pass-Abonnements, Live-Stream auf DAZN."),
+       "NFL-Spieltag mit NFL Game Pass ist Sport")
+pruefe(not m.echter_sport("Madden NFL 27: Trailer zeigt Gameplay, Release für PS5 und Xbox Series, neuer Saison-Modus."), "Madden bleibt")
+pruefe(not m.echter_sport("Neue Spiele diese Woche für PC, PS5 und Switch 2"), "Release-Liste bleibt")
+
 print()
 print("Alles in Ordnung." if not FEHLER else f"{len(FEHLER)} Fehler.")
 sys.exit(1 if FEHLER else 0)

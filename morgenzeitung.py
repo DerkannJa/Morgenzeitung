@@ -626,6 +626,21 @@ class Verlauf:
                  len(self.eintraege) + len(self.neu))
 
 
+# Echter Sport (nicht Videospiel): mindestens zwei Sportbegriffe und kein Videospiel-Begriff -> raus
+SPORT_RE = re.compile(r"\b(NFL|NBA|NHL|MLB|DAZN|Sky Sport|MagentaSport|RTL\+? NFL|Touchdowns?|Quarterbacks?|Super Bowl|"
+                      r"Playoffs?|Pflichtspiele?|Spieltag|Saison|Tabellen\w*|Divisions\w*|Bundesliga|Champions League|"
+                      r"Eishockey|Fußball|Handball|Basketball|Formel 1|Grand Prix|Trainer|Kader|Transfer\w*|Tor(e|schütze)|"
+                      r"Auswärts\w*|Heimspiel\w*|Rückspiel\w*|Liveticker|Live-Stream)\b", re.I)
+VIDEOSPIEL_RE = re.compile(r"\b(PS5|PS4|PlayStation|Xbox Series|Xbox One|Xbox Game Pass|Nintendo|Switch 2|Steam|"
+                           r"Videospiel\w*|Konsole\w*|Madden|NBA 2K\d*|NHL \d{2}|EA Sports FC|FIFA \d{2}|Gameplay|"
+                           r"Spielentwickler\w*|Entwicklerstudio\w*|Publisher|Early Access|DLC|Patch|Gamer\w*)\b", re.I)
+
+
+def echter_sport(text):
+    begriffe = {m.group(0).lower() for m in SPORT_RE.finditer(text)}
+    return len(begriffe) >= 2 and not VIDEOSPIEL_RE.search(text)
+
+
 def wort_re(woerter):
     return re.compile(r"\b(" + "|".join(re.escape(w) for w in woerter) + r")\b", re.I) if woerter else None
 
@@ -891,6 +906,9 @@ def rubrik_sammeln(r, gesehen, max_woerter, verlauf, ausgabe):
             continue
         if ausschluss_re and ausschluss_re.search(volltext_klar):
             weg("Ausschlusswort")
+            continue
+        if r.get("kein_sport") and echter_sport(titel + " " + kurztext + " " + volltext_klar):
+            weg("Sport statt Videospiel")
             continue
         if thema["anfang"] and (verlauf.thema_bekannt(thema) or any(gleiches_thema(thema, t) for t in ausgabe)):
             weg("Thema schon da")
