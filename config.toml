@@ -53,6 +53,7 @@ max_artikel = 6
 #   max_woerter  = Kürzungsgrenze nur für diese Rubrik
 #   stichwoerter = nur Berichte, die mindestens eines dieser Wörter enthalten
 #   ausschluss   = Berichte mit einem dieser Wörter fliegen raus
+#   plattformen / andere_plattformen = nur Berichte zu diesen Plattformen, nicht vor allem zu den anderen
 #   kein_sport   = true: Berichte über echten Sport fliegen raus (Videospiele wie Madden/EA FC bleiben)
 # Berichte, die schon in einer früheren Ausgabe standen, und Berichte zum selben
 # Thema (auch aus anderer Quelle) erscheinen nur einmal.
@@ -159,14 +160,17 @@ ausschluss = ["Eishockey", "Penny DEL", "DEL2", "Spieltag", "Bundesliga", "Champ
 
 [[rubrik]]
 name = "Neue Releases"
-feeds = ["https://news.google.com/rss/search?q=Spiele+Releases+diese+Woche+when:7d&hl=de&gl=DE&ceid=DE:de",
-         "https://news.google.com/rss/search?q=%22new+games+this+week%22+when:7d&hl=en-US&gl=US&ceid=US:en"]
+# Nur Xbox und PC: Berichte, die vor allem um PS5/PlayStation/Switch gehen, fliegen raus
+feeds = ["https://news.google.com/rss/search?q=Xbox+OR+PC+neue+Spiele+Release+diese+Woche+when:7d&hl=de&gl=DE&ceid=DE:de",
+         "https://news.google.com/rss/search?q=Spiele+Releases+diese+Woche+when:7d&hl=de&gl=DE&ceid=DE:de",
+         "https://news.google.com/rss/search?q=%22new+games%22+Xbox+OR+PC+this+week+when:7d&hl=en-US&gl=US&ceid=US:en"]
 anzahl = 3
 volltext = true
 nur_mit_text = true
 max_woerter = 400
 max_alter_stunden = 168
-stichwoerter = ["PS5", "PlayStation", "Xbox", "Nintendo", "Switch", "Steam", "PC", "Xbox Game Pass", "PC Game Pass", "Videospiel", "Videospiele", "Games", "Gaming", "Konsole", "Konsolen", "Early Access", "DLC"]
+plattformen = ["Xbox", "Xbox Series", "Xbox One", "Xbox Game Pass", "PC Game Pass", "PC", "Windows", "Steam", "Epic Games Store", "GOG"]
+andere_plattformen = ["PS5", "PS4", "PlayStation", "PS Plus", "PlayStation Plus", "Nintendo", "Switch", "Switch 2"]
 kein_sport = true   # echte Sportberichte (NFL, Bundesliga …) raus, Sport-Videospiele bleiben
 ausschluss = ["Eishockey", "Penny DEL", "DEL2", "Spieltag", "Bundesliga", "Champions League", "Fußball", "Handball", "Basketball", "Tabellenführer", "Eisbären", "Adler Mannheim", "Löwen Frankfurt", "Kölner Haie", "Pinguins", "Grizzlys"]
 

@@ -641,6 +641,20 @@ def echter_sport(text):
     return len(begriffe) >= 2 and not VIDEOSPIEL_RE.search(text)
 
 
+def plattform_passt(r, titel, text):
+    """True, wenn der Bericht um Lukas Plattformen geht (z. B. Xbox/PC) und nicht vor allem um andere (PS5)."""
+    gewollt, andere = wort_re(r.get("plattformen")), wort_re(r.get("andere_plattformen"))
+    if not gewollt:
+        return True
+    g_titel, a_titel = len(gewollt.findall(titel)), len(andere.findall(titel)) if andere else 0
+    if g_titel:
+        return True
+    if a_titel:
+        return False  # Titel nennt nur andere Plattformen, z. B. "PS5-Exklusivtitel …"
+    g, a = len(gewollt.findall(text)), len(andere.findall(text)) if andere else 0
+    return g > 0 and g >= a
+
+
 def wort_re(woerter):
     return re.compile(r"\b(" + "|".join(re.escape(w) for w in woerter) + r")\b", re.I) if woerter else None
 
@@ -906,6 +920,9 @@ def rubrik_sammeln(r, gesehen, max_woerter, verlauf, ausgabe):
             continue
         if ausschluss_re and ausschluss_re.search(volltext_klar):
             weg("Ausschlusswort")
+            continue
+        if not plattform_passt(r, titel, kurztext + " " + volltext_klar):
+            weg("andere Plattform")
             continue
         if r.get("kein_sport") and echter_sport(titel + " " + kurztext + " " + volltext_klar):
             weg("Sport statt Videospiel")

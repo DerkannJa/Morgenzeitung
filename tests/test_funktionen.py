@@ -188,6 +188,18 @@ pruefe(m.echter_sport("NFL Mexico als Highlight: fünf Pflichtspiele in Woche 11
 pruefe(not m.echter_sport("Madden NFL 27: Trailer zeigt Gameplay, Release für PS5 und Xbox Series, neuer Saison-Modus."), "Madden bleibt")
 pruefe(not m.echter_sport("Neue Spiele diese Woche für PC, PS5 und Switch 2"), "Release-Liste bleibt")
 
+# 8) Plattformfilter Neue Releases (nur Xbox/PC)
+import tomllib
+rel = [r for r in tomllib.load(open(Path(__file__).parent.parent / "config.toml", "rb"))["rubrik"] if r["name"] == "Neue Releases"][0]
+for titel, text, erwartet in [
+    ("PS5-Exklusiv: Ghost of Yotei bekommt Story-DLC", "Für PlayStation 5 erscheint ein DLC, später vielleicht auch für PC.", False),
+    ("PS Plus im Dezember: Diese Spiele gibt es", "PlayStation Plus Essential bietet drei Spiele für PS5 und PS4.", False),
+    ("Neue Spiele diese Woche", "Für PS5, Xbox Series und PC erscheinen fünf Spiele, dazu kommt ein Titel für Switch 2.", True),
+    ("Xbox Game Pass: Diese Spiele kommen im Dezember", "Auch auf PC Game Pass und in der Cloud.", True),
+    ("Die Releases der Woche", "Nintendo Switch 2 bekommt Mario, auf der PS5 erscheint ein Rennspiel, PlayStation-Fans freuen sich.", False),
+]:
+    pruefe(m.plattform_passt(rel, titel, text) == erwartet, f"Plattform {'passt' if erwartet else 'raus'}: {titel}")
+
 print()
 print("Alles in Ordnung." if not FEHLER else f"{len(FEHLER)} Fehler.")
 sys.exit(1 if FEHLER else 0)
