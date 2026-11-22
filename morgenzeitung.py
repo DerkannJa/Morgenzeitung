@@ -9,8 +9,10 @@ Aufruf:
 import argparse
 import datetime as dt
 import html
+import io
 import json
 import logging
+import math
 import re
 import smtplib
 import sys
@@ -32,6 +34,10 @@ try:
     from googlenewsdecoder import gnewsdecoder
 except ImportError:  # Google-News-Links auflösen ist optional
     gnewsdecoder = None
+try:
+    from PIL import Image, ImageDraw
+except ImportError:  # Bilder sind optional: ohne Pillow erscheint die Zeitung ohne Bilder
+    Image = ImageDraw = None
 
 TZ = ZoneInfo("Europe/Berlin")
 UA = "Mozilla/5.0 (X11; Linux x86_64) Morgenzeitung/1.0"
@@ -87,7 +93,81 @@ def zahl(x):
         return "?"
 
 
-def wetter_html(ha, entity):
+# Wetter-Icons: HA-Zustand -> Icon-Name. Gezeichnet mit Pillow, schwarz-weiß (gut für E-Ink).
+ICON_FUER = {
+    "sunny": "sonne", "clear-night": "mond", "partlycloudy": "teilsonnig", "cloudy": "wolke",
+    "windy": "wolke", "windy-variant": "wolke", "exceptional": "wolke", "fog": "nebel",
+    "rainy": "regen", "pouring": "regen", "lightning": "gewitter", "lightning-rainy": "gewitter",
+    "snowy": "schnee", "snowy-rainy": "schnee", "hail": "schnee",
+}
+
+
+def icon_png(name, groesse=96):
+    """Gibt PNG-Bytes eines Wetter-Icons zurück, oder None ohne Pillow."""
+    if Image is None:
+        return None
+    im = Image.new("L", (groesse, groesse), 255)
+    d = ImageDraw.Draw(im)
+    s = groesse / 96
+
+    def p(x, y):
+        return (x * s, y * s)
+
+    def wolke(dy=0, farbe=0):
+        for box in [(22, 44, 50, 70), (40, 34, 72, 66), (60, 46, 84, 70)]:
+            x0, y0, x1, y1 = box
+            d.ellipse((x0 * s, (y0 + dy) * s, x1 * s, (y1 + dy) * s), fill=farbe)
+        d.rectangle((34 * s, (52 + dy) * s, 80 * s, (70 + dy) * s), fill=farbe)
+
+    def sonne(x, y, r):
+        d.ellipse(((x - r) * s, (y - r) * s, (x + r) * s, (y + r) * s), fill=0)
+        for k in range(8):
+            a = k * math.pi / 4
+            d.line((x * s + math.cos(a) * (r + 6) * s, y * s + math.sin(a) * (r + 6) * s,
+                    x * s + math.cos(a) * (r + 12) * s, y * s + math.sin(a) * (r + 12) * s),
+                   fill=0, width=max(1, int(4 * s)))
+
+    if name == "sonne":
+        sonne(48, 42, 16)
+    elif name == "mond":
+        d.ellipse((30 * s, 16 * s, 74 * s, 60 * s), fill=0)
+        d.ellipse((42 * s, 10 * s, 84 * s, 54 * s), fill=255)
+    elif name == "teilsonnig":
+        sonne(64, 30, 12)
+        wolke()
+    elif name == "wolke":
+        wolke()
+    elif name == "nebel":
+        for y in (34, 48, 62):
+            d.line((p(16, y), p(80, y)), fill=0, width=max(1, int(6 * s)))
+    elif name == "regen":
+        wolke(-12)
+        for x in (34, 50, 66):
+            d.line((p(x, 78), p(x - 5, 90)), fill=0, width=max(1, int(4 * s)))
+    elif name == "schnee":
+        wolke(-12)
+        for x in (34, 50, 66):
+            d.ellipse((x * s - 3 * s, 80 * s, x * s + 3 * s, 86 * s), fill=0)
+    elif name == "gewitter":
+        wolke(-12)
+        d.polygon([p(52, 66), p(40, 84), p(50, 84), p(44, 96), p(62, 78), p(52, 78)], fill=0)
+    buf = io.BytesIO()
+    im.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
+def icon_ref(bilder, zustand):
+    """Setzt das Icon für einen Wetterzustand in die Bilder-Tabelle und liefert das <img>-Tag."""
+    name = ICON_FUER.get(zustand)
+    png = icon_png(name) if name else None
+    if not png:
+        return ""
+    pfad = f"bilder/wetter_{name}.png"
+    bilder.setdefault(pfad, (png, "image/png"))
+    return f"<img class='icon' src='{pfad}' alt=''/>"
+
+
+def wetter_html(ha, entity, bilder):
     st = ha.get(f"/api/states/{entity}")
     a = st.get("attributes", {})
     einheit = a.get("temperature_unit", "°C")
@@ -96,7 +176,7 @@ def wetter_html(ha, entity):
         jetzt.append(f"Luftfeuchte {zahl(a['humidity'])} %")
     if a.get("wind_speed") is not None:
         jetzt.append(f"Wind {zahl(a['wind_speed'])} {esc(a.get('wind_speed_unit', 'km/h'))}")
-    teile = [f"<p class='zeile'><b>Jetzt</b> {', '.join(jetzt)}</p>"]
+    teile = [f"<p class='zeile'>{icon_ref(bilder, st['state'])}<b>Jetzt</b> {', '.join(jetzt)}</p>"]
     try:
         res = ha.post("/api/services/weather/get_forecasts?return_response",
                       {"entity_id": entity, "type": "daily"})
@@ -106,7 +186,7 @@ def wetter_html(ha, entity):
             name = "Heute" if tag == heute else TAGE[tag.weekday()][:2]
             regen = f.get("precipitation_probability")
             regen = f", Regen {zahl(regen)} %" if regen is not None else ""
-            teile.append(f"<p class='zeile'><b>{name}</b> "
+            teile.append(f"<p class='zeile'>{icon_ref(bilder, f.get('condition'))}<b>{name}</b> "
                          f"{esc(WETTER.get(f.get('condition'), f.get('condition', '')))}, "
                          f"{zahl(f.get('templow'))} bis {zahl(f.get('temperature'))} {esc(einheit)}{regen}</p>")
     except Exception as e:  # Vorhersage optional
@@ -169,7 +249,7 @@ def feiertage_html(ha, kalender, tage):
 ANILIST = "https://graphql.anilist.co"
 ANILIST_LISTE = """query ($name: String) {
   MediaListCollection(userName: $name, type: ANIME, status_in: [CURRENT, REPEATING]) {
-    lists { entries { media { id title { romaji english } } } }
+    lists { entries { media { id title { romaji english } coverImage { large } } } }
   }
 }"""
 ANILIST_TERMINE = """query ($ids: [Int], $von: Int, $bis: Int) {
@@ -225,7 +305,25 @@ def stream_termine():
     return termine
 
 
-def anime_html(cfg):
+def cover_png(url, breite=110):
+    """Anime-Cover als kleines Graustufen-Bild mit Dithering (PNG-Bytes). None bei Fehler oder ohne Pillow."""
+    if Image is None or not url:
+        return None
+    try:
+        r = requests.get(url, headers={"User-Agent": UA}, timeout=20)
+        r.raise_for_status()
+        im = Image.open(io.BytesIO(r.content)).convert("L")
+        im.thumbnail((breite, breite * 2))
+        im = im.convert("1")  # Floyd-Steinberg-Dithering: Graustufen wirken auf E-Ink sonst matschig
+        buf = io.BytesIO()
+        im.save(buf, "PNG", optimize=True)
+        return buf.getvalue()
+    except Exception as e:  # Cover ist optional
+        log.warning("Anime-Cover nicht ladbar: %s", e)
+        return None
+
+
+def anime_html(cfg, bilder):
     """Neue Folgen von heute für alle Anime, die auf AniList als 'Watching' stehen. None wenn keine.
     Uhrzeit = Stream-Start mit Untertiteln laut animeschedule.net; ohne Eintrag dort die
     TV-Ausstrahlung in Japan (AniList), gekennzeichnet mit 'Japan-TV'."""
@@ -233,7 +331,7 @@ def anime_html(cfg):
     if not nutzer or nutzer.startswith("DEIN"):
         return None
     liste = anilist(ANILIST_LISTE, {"name": nutzer})["MediaListCollection"]
-    titel, namen = {}, {}
+    titel, namen, cover = {}, {}, {}
     for l in (liste or {}).get("lists") or []:
         for e in l.get("entries") or []:
             t = e["media"]["title"]
@@ -241,6 +339,7 @@ def anime_html(cfg):
             titel[mid] = (t.get("english") if cfg.get("titel") == "english" else None) \
                 or t.get("romaji") or t.get("english") or "?"
             namen[mid] = {name_norm(x) for x in (t.get("romaji"), t.get("english")) if x}
+            cover[mid] = (e["media"].get("coverImage") or {}).get("large")
     if not titel:
         log.info("Anime: keine Serien auf 'Watching'")
         return None
@@ -270,7 +369,15 @@ def anime_html(cfg):
         wann = "schon da" if zeit <= jetzt else zeit.strftime("%H:%M")
         folge = f"Folge {ep}" if ep else "neue Folge"
         zusatz = ", Japan-TV" if japan else ""
-        out.append(f"<p class='zeile'><b>{wann}</b> {esc(titel[mid])} <i>({folge}{zusatz})</i></p>")
+        img = ""
+        pfad = f"bilder/anime_{mid}.png"
+        if pfad not in bilder:  # Cover pro Serie nur einmal laden
+            png = cover_png(cover.get(mid))
+            if png:
+                bilder[pfad] = (png, "image/png")
+        if pfad in bilder:
+            img = f"<img class='cover' src='{pfad}' alt=''/>"
+        out.append(f"<p class='zeile'>{img}<b>{wann}</b> {esc(titel[mid])} <i>({folge}{zusatz})</i></p>")
     return "".join(out)
 
 
@@ -1078,6 +1185,8 @@ p { margin: 0 0 0.6em 0; text-indent: 0; text-align: left; hyphens: auto; -webki
 .kasten h2 { font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.1em; font-weight: bold;
              border-bottom: 1px solid #000; padding-bottom: 0.15em; margin: 0 0 0.4em; }
 .zeile { margin: 0 0 0.25em; text-align: left; }
+.icon { width: 1.3em; height: 1.3em; vertical-align: middle; margin-right: 0.4em; }
+.cover { width: 2.4em; height: 3.4em; vertical-align: middle; margin-right: 0.5em; }
 .zeile b { display: inline-block; min-width: 5em; }
 .leer { font-style: italic; color: #555; }
 .inhalt a { text-decoration: none; color: #000; }
@@ -1108,12 +1217,16 @@ def xhtml(titel, inhalt):
             f'<body>{inhalt}</body></html>')
 
 
-def epub_bauen(pfad, titel, heute, kapitel):
-    """kapitel: Liste von (dateiname, titel, html_inhalt)."""
+def epub_bauen(pfad, titel, heute, kapitel, bilder=None):
+    """kapitel: Liste von (dateiname, titel, html_inhalt).
+    bilder: {pfad_im_epub: (bytes, mediatype)}, z. B. {"bilder/anime_1.png": (...)}"""
+    bilder = bilder or {}
     ident = f"urn:uuid:{uuid.uuid4()}"
     geaendert = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     manifest = "".join(f'<item id="c{i}" href="{d}" media-type="application/xhtml+xml"/>'
                        for i, (d, _, _) in enumerate(kapitel))
+    manifest += "".join(f'<item id="b{i}" href="{p}" media-type="{mt}"/>'
+                        for i, (p, (_, mt)) in enumerate(bilder.items()))
     spine = "".join(f'<itemref idref="c{i}"/>' for i in range(len(kapitel)))
     opf = f"""<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="de">
@@ -1154,6 +1267,8 @@ def epub_bauen(pfad, titel, heute, kapitel):
         z.writestr("OEBPS/style.css", CSS, compress_type=zipfile.ZIP_DEFLATED)
         for d, t, inhalt in kapitel:
             z.writestr(f"OEBPS/{d}", xhtml(t, inhalt), compress_type=zipfile.ZIP_DEFLATED)
+        for p, (daten, _) in bilder.items():
+            z.writestr(f"OEBPS/{p}", daten, compress_type=zipfile.ZIP_STORED)
 
 
 def zeitung_bauen(cfg):
@@ -1168,11 +1283,12 @@ def zeitung_bauen(cfg):
     def kasten(titel, inhalt):
         titelseite.append(f"<div class='kasten'><h2>{titel}</h2>{inhalt}</div>")
 
+    bilder = {}  # pfad_im_epub -> (bytes, mediatype), gefüllt von Wetter und Anime
     hacfg = cfg.get("homeassistant")
     if hacfg and "LANGLEBIG" not in hacfg.get("token", "LANGLEBIG"):
         ha = HA(hacfg)
         try:
-            kasten("Wetter", wetter_html(ha, hacfg["wetter"]))
+            kasten("Wetter", wetter_html(ha, hacfg["wetter"], bilder))
         except Exception as e:
             log.warning("Wetter nicht verfügbar: %s", e)
         kasten("Termine", termine_html(ha, hacfg.get("kalender", []), hacfg.get("kalender_tage", 2)))
@@ -1188,7 +1304,7 @@ def zeitung_bauen(cfg):
 
     if cfg.get("anime"):
         try:
-            an = anime_html(cfg["anime"])
+            an = anime_html(cfg["anime"], bilder)
             if an:
                 kasten("Anime – neue Folgen heute", an)
         except Exception as e:
@@ -1230,7 +1346,7 @@ def zeitung_bauen(cfg):
     ordner = Path(z["ausgabe_ordner"])
     ordner.mkdir(parents=True, exist_ok=True)
     pfad = ordner / f"Morgenzeitung_{heute:%Y-%m-%d}.epub"
-    epub_bauen(pfad, z["titel"], heute, kapitel)
+    epub_bauen(pfad, z["titel"], heute, kapitel, bilder)
     log.info("EPUB erstellt: %s (%d KB)", pfad, pfad.stat().st_size // 1024)
 
     tage = z.get("behalten_tage", 14)
