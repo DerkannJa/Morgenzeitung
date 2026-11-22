@@ -200,6 +200,25 @@ for titel, text, erwartet in [
 ]:
     pruefe(m.plattform_passt(rel, titel, text) == erwartet, f"Plattform {'passt' if erwartet else 'raus'}: {titel}")
 
+# 9) Keine Menüpunkte als Spiele, Datum aus Titel/Text
+md_menue = """Eight games are leaving Xbox Game Pass soon.
+- Daily
+- Source
+- Newsletter
+"""
+pruefe(m.abgang_spiele(md_menue, "Eight Games Are Leaving Xbox Game Pass Soon") == [], "Menüpunkte ohne Überschrift sind keine Spiele")
+md_ohne_datum = """Xbox has revealed the next games leaving Game Pass at the end of November.
+## Games leaving Xbox Game Pass
+- Star Trucker
+- Moving Out 2
+## New games joining Game Pass
+- High on Life 2
+"""
+sp = m.abgang_spiele(md_ohne_datum, "Xbox Game Pass loses eight more games at the end of November")
+pruefe([x[0] for x in sp] == ["Star Trucker", "Moving Out 2"] and all(x[1] == "November 30" for x in sp),
+       f"Datum aus 'end of November': {sp}")
+pruefe(m.artikel_datum("These games will leave Game Pass on December 15 alongside others.") == "December 15", "Datum aus Fließtext")
+
 print()
 print("Alles in Ordnung." if not FEHLER else f"{len(FEHLER)} Fehler.")
 sys.exit(1 if FEHLER else 0)

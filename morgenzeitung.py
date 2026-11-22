@@ -282,19 +282,41 @@ MONAT = r"(?:January|February|March|April|May|June|July|August|September|October
 GESPERRT = ("trueachievements.com",)
 
 
-def abgang_spiele(md):
+def artikel_datum(md, titel=""):
+    """Abgangsdatum aus dem Artikel: 'leaving … on November 30', sonst 'end of November' / 'mid-November'."""
+    text = titel + "\n" + md
+    m = re.search(rf"(?:leav|exit|remov|depart|los(?:e|ing))\w*[^.\n]{{0,120}}?({MONAT}\s+\d{{1,2}})", text, re.I)
+    if m:
+        return m.group(1)
+    m = re.search(rf"end of\s+({MONAT})", text, re.I)
+    if m:
+        monat = m.group(1).capitalize()
+        tage = {"February": 28, "April": 30, "June": 30, "September": 30, "November": 30}.get(monat, 31)
+        return f"{monat} {tage}"
+    m = re.search(rf"mid-?\s*({MONAT})", text, re.I)
+    if m:
+        return f"{m.group(1).capitalize()} 15"
+    return ""
+
+
+def abgang_spiele(md, titel=""):
     """Spiele aus den Listen unter 'leaving'-Überschriften eines Artikels (Markdown).
+    Nur Listen unter solchen Überschriften zählen (sonst landen Menüpunkte wie 'Daily' als Spiel in der Liste).
     Gibt [(name, datum_text)] zurück."""
-    spiele, aktiv, datum, irgendwo = [], False, "", []
+    spiele, aktiv, datum = [], False, ""
+    standard_datum = artikel_datum(md, titel)
     for zeile in md.splitlines():
         z = zeile.strip()
-        if z.startswith("#") or (z.startswith("**") and z.endswith("**") and len(z) < 120):
-            aktiv = bool(re.search(r"leav|los(e|ing)|remov|exit|depart", z, re.I))
+        ist_ueberschrift = z.startswith("#") or (z.startswith("**") and z.endswith("**") and len(z) < 120) \
+            or (z.endswith(":") and len(z) < 120 and not z.startswith(("-", "*", "•")))
+        if ist_ueberschrift:
+            aktiv = bool(re.search(r"leav|los(e|ing)|remov|exit|depart", z, re.I)) \
+                and not re.search(r"join|coming|new games|added", z, re.I)
             m = re.search(rf"({MONAT}\s+\d{{1,2}})", z)
             datum = m.group(1) if m else ""
             continue
         m = re.match(r"[-*•]\s+(.*)", z)
-        if not m:
+        if not m or not aktiv:
             continue
         name = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", m.group(1))   # Links -> Text
         name = name.replace("**", "").replace("__", "")
@@ -304,9 +326,7 @@ def abgang_spiele(md):
         name = name.replace("™", "").replace("®", "").strip()
         if not name or len(name) > 70 or len(name.split()) > 10:
             continue
-        (spiele if aktiv else irgendwo).append((name, datum or (d.group(1) if d else "")))
-    if not spiele and len(irgendwo) >= 2:
-        spiele = irgendwo
+        spiele.append((name, datum or (d.group(1) if d else "") or standard_datum))
     eindeutig, namen = [], set()
     for sp in spiele:
         k = spiel_key(sp[0])
@@ -335,12 +355,14 @@ def hltb_stunden(name):
         versuche += [vor, nach]
     for v in dict.fromkeys(versuche):
         try:
-            res = HowLongToBeat(0.5).search(v, similarity_case_sensitive=False)
+            res = HowLongToBeat(0.75).search(v, similarity_case_sensitive=False)
         except Exception as e:
             log.info("HowLongToBeat nicht erreichbar (%s): %s", v, e)
             return None
         if res:
             best = max(res, key=lambda e: e.similarity)
+            if best.similarity < 0.75:
+                continue
             if best.completionist:
                 log.info("HowLongToBeat: %s -> %s, 100 %% in %s Std.", v, best.game_name, best.completionist)
                 return float(best.completionist), best.game_name
@@ -380,6 +402,8 @@ def gamepass_html(cfg, z):
     except Exception as e:
         log.warning("Game-Pass-Stand nicht lesbar, starte leer: %s", e)
         stand = {}
+    if stand.get("version") != 2:
+        stand = {"version": 2}
     artikel = {k: v for k, v in stand.get("artikel", {}).items() if v >= (heute - dt.timedelta(days=30)).isoformat()}
     spiele = {k: v for k, v in stand.get("spiele", {}).items() if v["bis"] >= heute.isoformat()}
     geaendert = len(artikel) != len(stand.get("artikel", {})) or len(spiele) != len(stand.get("spiele", {}))
@@ -407,7 +431,7 @@ def gamepass_html(cfg, z):
         except Exception as ex:
             log.info("Game-Pass-Artikel nicht lesbar (%s): %s", echt, ex)
             continue
-        alle = abgang_spiele(md)
+        alle = abgang_spiele(md, titel)
         log.info("Game Pass: %d Spiele in '%s' (%s): %s", len(alle), titel, echt.split("/")[2],
                  ", ".join(a[0] for a in alle))
         if len(alle) < 2:
@@ -428,9 +452,9 @@ def gamepass_html(cfg, z):
                 kurz.append(name)
         log.info("Game Pass: %d neu geprüft, %d bis %d Std.: %s", len(neu), len(kurz), max_h, ", ".join(kurz))
 
-    if geaendert or stand.get("geprueft"):
+    if geaendert or stand.get("geprueft") or not pfad.exists():
         stand["geprueft"] = {k: v for k, v in stand.get("geprueft", {}).items() if v >= heute.isoformat()}
-        stand.update(artikel=artikel, spiele=spiele)
+        stand.update(artikel=artikel, spiele=spiele, version=2)
         try:
             pfad.parent.mkdir(parents=True, exist_ok=True)
             tmp = pfad.with_suffix(".tmp")
