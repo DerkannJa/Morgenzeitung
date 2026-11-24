@@ -35,7 +35,7 @@ try:
 except ImportError:  # Google-News-Links auflösen ist optional
     gnewsdecoder = None
 try:
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageOps
 except ImportError:  # Bilder sind optional: ohne Pillow erscheint die Zeitung ohne Bilder
     Image = ImageDraw = None
 
@@ -164,7 +164,7 @@ def icon_ref(bilder, zustand):
         return ""
     pfad = f"bilder/wetter_{name}.png"
     bilder.setdefault(pfad, (png, "image/png"))
-    return f"<img class='icon' src='{pfad}' width='40' height='40' alt=''/>"
+    return f"<img class='icon' src='{pfad}' width='56' height='56' alt=''/>"
 
 
 def wetter_html(ha, entity, bilder):
@@ -305,15 +305,18 @@ def stream_termine():
     return termine
 
 
-def cover_png(url, breite=110):
-    """Anime-Cover als kleines Graustufen-Bild mit Dithering (PNG-Bytes). None bei Fehler oder ohne Pillow."""
+COVER_GROESSE = (260, 380)  # festes Format 2:3 für alle Cover, damit alle gleich groß dargestellt werden
+
+
+def cover_png(url):
+    """Anime-Cover als Graustufen-Bild mit Dithering, immer COVER_GROESSE (PNG-Bytes). None bei Fehler oder ohne Pillow."""
     if Image is None or not url:
         return None
     try:
         r = requests.get(url, headers={"User-Agent": UA}, timeout=20)
         r.raise_for_status()
         im = Image.open(io.BytesIO(r.content)).convert("L")
-        im.thumbnail((breite, breite * 2))
+        im = ImageOps.fit(im, COVER_GROESSE, Image.LANCZOS)  # zuschneiden statt skalieren: fester Rahmen
         im = im.convert("1")  # Floyd-Steinberg-Dithering: Graustufen wirken auf E-Ink sonst matschig
         buf = io.BytesIO()
         im.save(buf, "PNG", optimize=True)
@@ -376,8 +379,12 @@ def anime_html(cfg, bilder):
             if png:
                 bilder[pfad] = (png, "image/png")
         if pfad in bilder:
-            img = f"<img class='cover' src='{pfad}' width='60' height='85' alt=''/>"
-        out.append(f"<p class='zeile'>{img}<b>{wann}</b> {esc(titel[mid])} <i>({folge}{zusatz})</i></p>")
+            img = (f"<img class='cover' src='{pfad}' width='130' height='190' "
+                   f"style='width:130px;height:190px' alt=''/>")
+        # Tabelle statt Fließtext: Cover links, Uhrzeit und Titel daneben (Kindle-tauglich)
+        out.append(f"<table class='anime'><tr><td class='cv'>{img}</td><td>"
+                   f"<p class='zeile'><b>{wann}</b> {esc(titel[mid])}</p>"
+                   f"<p class='zeile'><i>{folge}{zusatz}</i></p></td></tr></table>")
     return "".join(out)
 
 
@@ -1185,8 +1192,11 @@ p { margin: 0 0 0.6em 0; text-indent: 0; text-align: left; hyphens: auto; -webki
 .kasten h2 { font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.1em; font-weight: bold;
              border-bottom: 1px solid #000; padding-bottom: 0.15em; margin: 0 0 0.4em; }
 .zeile { margin: 0 0 0.25em; text-align: left; }
-.icon { width: 1.3em; height: 1.3em; vertical-align: middle; margin-right: 0.4em; }
-.cover { width: 2.4em; height: 3.4em; vertical-align: middle; margin-right: 0.5em; }
+.icon { width: 1.9em; height: 1.9em; vertical-align: middle; margin-right: 0.4em; }
+.anime { width: 100%; border-collapse: collapse; margin: 0 0 0.5em; }
+.anime td { vertical-align: middle; padding: 0; }
+.anime td.cv { width: 7.2em; padding-right: 0.6em; }
+.anime .zeile b { min-width: 0; }
 .zeile b { display: inline-block; min-width: 5em; }
 .leer { font-style: italic; color: #555; }
 .inhalt a { text-decoration: none; color: #000; }
