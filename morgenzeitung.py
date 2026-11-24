@@ -164,7 +164,7 @@ def icon_ref(bilder, zustand):
         return ""
     pfad = f"bilder/wetter_{name}.png"
     bilder.setdefault(pfad, (png, "image/png"))
-    return f"<img class='icon' src='{pfad}' alt=''/>"
+    return f"<img class='icon' src='{pfad}' width='40' height='40' alt=''/>"
 
 
 def wetter_html(ha, entity, bilder):
@@ -376,7 +376,7 @@ def anime_html(cfg, bilder):
             if png:
                 bilder[pfad] = (png, "image/png")
         if pfad in bilder:
-            img = f"<img class='cover' src='{pfad}' alt=''/>"
+            img = f"<img class='cover' src='{pfad}' width='60' height='85' alt=''/>"
         out.append(f"<p class='zeile'>{img}<b>{wann}</b> {esc(titel[mid])} <i>({folge}{zusatz})</i></p>")
     return "".join(out)
 
@@ -1309,6 +1309,12 @@ def zeitung_bauen(cfg):
                 kasten("Anime – neue Folgen heute", an)
         except Exception as e:
             log.warning("Anime (AniList) nicht verfügbar: %s", e)
+    # Früh loggen, damit die Zeile in der (gekürzten) Handy-Meldung sichtbar ist
+    if Image is None:
+        log.warning("Bilder: Pillow fehlt im venv – Zeitung ohne Bilder")
+    else:
+        log.info("Bilder: %d auf der Titelseite (%s)", len(bilder),
+                 ", ".join(p.split("/")[-1] for p in bilder) or "keine")
 
     verlauf = Verlauf(z.get("verlauf_datei"), z.get("verlauf_tage", 21))
     if cfg.get("gamepass"):
@@ -1410,7 +1416,7 @@ class Mitschrift(logging.Handler):
         msg = rec.getMessage()
         if rec.levelno >= logging.WARNING:
             self.warnungen.append(msg[:160])
-        elif msg.startswith(("Rubrik ", "Game Pass: ", "Anime: ")) and "Diagnose" not in msg:
+        elif msg.startswith(("Bilder: ", "Rubrik ", "Game Pass: ", "Anime: ")) and "Diagnose" not in msg:
             self.rubriken.append(msg[:160])
 
 
